@@ -1277,12 +1277,9 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
 @media (max-width: 1024px) {
   .kanban-board { grid-template-columns: repeat(3, 1fr); }
   .ticket-body { grid-template-columns: 1fr; }
-}
 
-@media (max-width: 768px) {
   .header { padding: 10px 16px; gap: 8px; }
   .main { padding: 16px; }
-  .kanban-board { grid-template-columns: 1fr; }
   .ticket-row { grid-template-columns: auto 1fr auto; }
   .ticket-row .ticket-status,
   .ticket-row .priority-badge,
@@ -1333,6 +1330,10 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   }
 
   .resource-view-tabs { flex-direction: column; }
+}
+
+@media (max-width: 768px) {
+  .kanban-board { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {
