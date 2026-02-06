@@ -44,14 +44,20 @@ fi
 echo -e "${YELLOW}[2/5] Загрузка обновлений...${NC}"
 
 # Check if we're running from a deploy directory (deploy.sh uploaded files)
+# But NOT from the app directory itself (./zt update)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/server.js" ] && [ -f "$SCRIPT_DIR/database.js" ] && [ -d "$SCRIPT_DIR/public" ]; then
+SCRIPT_DIR_REAL="$(realpath "$SCRIPT_DIR" 2>/dev/null || echo "$SCRIPT_DIR")"
+APP_DIR_REAL="$(realpath "$APP_DIR" 2>/dev/null || echo "$APP_DIR")"
+
+if [ "$SCRIPT_DIR_REAL" != "$APP_DIR_REAL" ] && [ -f "$SCRIPT_DIR/server.js" ] && [ -f "$SCRIPT_DIR/database.js" ] && [ -d "$SCRIPT_DIR/public" ]; then
   # Use locally available files (from deploy.sh)
   TMPDIR="$SCRIPT_DIR"
+  CLEANUP_TMP=0
   echo -e "${GREEN}  Используются локально загруженные файлы${NC}"
 else
-  # Fallback: clone from git
+  # Clone from git
   TMPDIR=$(mktemp -d)
+  CLEANUP_TMP=1
   git clone --depth 1 "$REPO" "$TMPDIR" 2>&1 | tail -1
   echo -e "${GREEN}  Код загружен из GitHub${NC}"
 fi
@@ -67,7 +73,7 @@ cp -r "$TMPDIR/public/"   "$APP_DIR/"
 [ -f "$TMPDIR/setup-domain.sh" ] && cp "$TMPDIR/setup-domain.sh" "$APP_DIR/" 2>/dev/null || true
 
 # Не трогаем: .env, data/, uploads/, node_modules/
-if [ "$TMPDIR" != "$SCRIPT_DIR" ]; then
+if [ "$CLEANUP_TMP" = "1" ]; then
   rm -rf "$TMPDIR"
 fi
 
