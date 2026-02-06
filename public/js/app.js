@@ -443,6 +443,12 @@ const App = {
     const content = document.getElementById('content');
     if (!content) return;
 
+    // Cleanup typing poll from previous ticket view
+    if (this._typingPollInterval) {
+      clearInterval(this._typingPollInterval);
+      this._typingPollInterval = null;
+    }
+
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 
@@ -1192,6 +1198,8 @@ const App = {
                 ${(t.messages || []).map(m => this.renderMessage(m)).join('')}
               </div>
 
+              <div class="typing-indicator" id="typing-indicator" style="display:none"></div>
+
               ${['closed', 'rejected', 'duplicate'].includes(t.status) ? `
               <div class="message-form-closed" style="text-align:center;padding:20px;color:var(--text-muted);border:1px dashed var(--border);border-radius:var(--radius-lg);margin-top:8px">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
@@ -1425,7 +1433,27 @@ const App = {
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-message-btn');
 
+    // Typing indicator polling for this ticket
+    this._typingPollInterval = setInterval(async () => {
+      try {
+        const data = await this.api('GET', `/api/presence/typing/${ticket.id}`);
+        this.renderTypingIndicator(data.typing);
+      } catch {}
+    }, 2000);
+    // Initial fetch
+    this.api('GET', `/api/presence/typing/${ticket.id}`)
+      .then(data => this.renderTypingIndicator(data.typing))
+      .catch(() => {});
+
     if (attachBtn && fileInput && messageInput && sendBtn) {
+      // Send typing event on keystroke (throttled)
+      let typingThrottle = null;
+      messageInput.addEventListener('input', () => {
+        if (typingThrottle) return;
+        typingThrottle = setTimeout(() => { typingThrottle = null; }, 2500);
+        this.api('POST', '/api/presence/typing', { ticketId: ticket.id }).catch(() => {});
+      });
+
       attachBtn.addEventListener('click', () => fileInput.click());
 
       fileInput.addEventListener('change', (e) => {
@@ -1639,6 +1667,43 @@ const App = {
         this.renderFilePreview(files);
       });
     });
+  },
+
+  renderTypingIndicator(typers) {
+    const el = document.getElementById('typing-indicator');
+    if (!el) return;
+
+    if (!typers || typers.length === 0) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+
+    const avatars = typers.map(u => {
+      if (u.photo_url) {
+        return `<img src="${u.photo_url}" class="typing-avatar" alt="" title="${esc(u.first_name || u.username || '')}">`;
+      }
+      return `<div class="typing-avatar-placeholder" title="${esc(u.first_name || u.username || '')}">${(u.first_name || '?')[0].toUpperCase()}</div>`;
+    }).join('');
+
+    const names = typers.map(u => esc(u.first_name || u.username || 'Кто-то'));
+    let text;
+    if (names.length === 1) {
+      text = `${names[0]} печатает`;
+    } else if (names.length === 2) {
+      text = `${names[0]} и ${names[1]} печатают`;
+    } else {
+      text = `${names[0]} и ещё ${names.length - 1} печатают`;
+    }
+
+    el.style.display = 'flex';
+    el.innerHTML = `
+      <div class="typing-avatars">${avatars}</div>
+      <div class="typing-text">
+        <span>${text}</span>
+        <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+      </div>
+    `;
   },
 
   // ========== Online View ==========

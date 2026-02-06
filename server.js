@@ -454,6 +454,32 @@ const onlineUsers = new Map();
 // SSE clients for presence broadcast
 const presenceClients = new Set();
 
+// Typing indicators: ticketId -> Map<userId, { user, timestamp }>
+const typingUsers = new Map();
+const TYPING_TIMEOUT = 4000; // 4s — typing indicator disappears after this
+
+function getTypingInTicket(ticketId, excludeUserId) {
+  const map = typingUsers.get(ticketId);
+  if (!map) return [];
+  const now = Date.now();
+  const result = [];
+  for (const [uid, entry] of map) {
+    if (now - entry.timestamp > TYPING_TIMEOUT) {
+      map.delete(uid);
+      continue;
+    }
+    if (uid === excludeUserId) continue;
+    result.push({
+      id: entry.user.id,
+      first_name: entry.user.first_name,
+      username: entry.user.username,
+      photo_url: entry.user.photo_url,
+    });
+  }
+  if (map.size === 0) typingUsers.delete(ticketId);
+  return result;
+}
+
 function getOnlineList() {
   const now = Date.now();
   const TIMEOUT = 60_000; // 60s — user considered offline after this
@@ -1144,6 +1170,28 @@ app.post('/api/presence/heartbeat', authMiddleware, async (req, res) => {
 
   broadcastPresence();
   res.json({ ok: true });
+});
+
+// Typing indicator: user is typing in a ticket
+app.post('/api/presence/typing', authMiddleware, (req, res) => {
+  const { ticketId } = req.body;
+  if (!ticketId) return res.json({ ok: true });
+
+  const tid = parseInt(ticketId);
+  if (!typingUsers.has(tid)) typingUsers.set(tid, new Map());
+  typingUsers.get(tid).set(req.user.id, {
+    user: req.user,
+    timestamp: Date.now(),
+  });
+
+  res.json({ ok: true });
+});
+
+// Get who is typing in a specific ticket
+app.get('/api/presence/typing/:ticketId', authMiddleware, (req, res) => {
+  const tid = parseInt(req.params.ticketId);
+  const typers = getTypingInTicket(tid, req.user.id);
+  res.json({ typing: typers });
 });
 
 // GET online users list (for initial load / non-SSE fallback)
