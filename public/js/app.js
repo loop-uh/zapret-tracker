@@ -3382,24 +3382,23 @@ function esc(str) {
 }
 
 // ========== Markdown Rendering ==========
-if (typeof marked !== 'undefined') {
-  marked.use({
-    breaks: true,
-    gfm: true,
-    renderer: {
-      link({ href, title, text }) {
-        const titleAttr = title ? ` title="${esc(title)}"` : '';
-        return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
-      }
+// Configure DOMPurify to add target="_blank" to all links
+if (typeof DOMPurify !== 'undefined') {
+  DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+    if (node.tagName === 'A') {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
     }
   });
 }
 
 function renderMarkdown(text) {
   if (!text) return '';
-  if (typeof marked === 'undefined') return esc(text);
+  // Check for the actual parse function
+  var parseFn = (typeof marked !== 'undefined') && (marked.parse || marked);
+  if (typeof parseFn !== 'function') return esc(text);
   try {
-    const html = marked.parse(text);
+    var html = parseFn(text, { breaks: true, gfm: true });
     if (typeof DOMPurify !== 'undefined') {
       return DOMPurify.sanitize(html, {
         ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
@@ -3411,6 +3410,7 @@ function renderMarkdown(text) {
     }
     return html;
   } catch (e) {
+    console.error('Markdown render error:', e);
     return esc(text);
   }
 }
