@@ -1826,6 +1826,11 @@ const App = {
         try {
           const msg = await this.api('POST', `/api/tickets/${ticket.id}/messages`, formData, true);
           messageInput.value = '';
+          messageInput.style.display = '';
+          const previewPane = document.getElementById('message-preview');
+          if (previewPane) { previewPane.style.display = 'none'; previewPane.innerHTML = ''; }
+          const previewToggle = document.querySelector('#message-form .md-preview-toggle');
+          if (previewToggle) previewToggle.classList.remove('active');
           selectedFiles.length = 0;
           this.renderFilePreview(selectedFiles);
 
@@ -2013,7 +2018,7 @@ const App = {
               ${r.author_is_admin ? '<span class="admin-badge" style="font-size:9px">Админ</span>' : ''}
               <span class="thread-reply-date">${timeAgo(r.created_at)}</span>
               ${canDelete ? `<button class="thread-reply-delete" data-reply-id="${r.id}" title="Удалить">&times;</button>` : ''}
-              <div class="thread-reply-content">${esc(r.content)}</div>
+              <div class="thread-reply-content markdown-body">${renderMarkdown(r.content)}</div>
             </div>
           </div>
         `;
@@ -2130,7 +2135,7 @@ const App = {
             <span class="message-date">${timeAgo(m.created_at)}</span>
             ${actionsHtml}
           </div>
-          <div class="message-content markdown-body" id="msg-content-${m.id}">${renderMarkdown(m.content)}</div>
+          <div class="message-content markdown-body" id="msg-content-${m.id}" data-raw="${esc(m.content)}">${renderMarkdown(m.content)}</div>
           ${attachmentsHtml ? `<div class="message-attachments">${attachmentsHtml}</div>` : ''}
           <div class="message-reactions" id="msg-reactions-${m.id}">${reactionsHtml}</div>
           ${replyCountHtml}
@@ -3054,8 +3059,12 @@ const App = {
             <input class="form-input" id="create-title" placeholder="Краткое описание проблемы или идеи" autofocus>
           </div>
           <div class="form-group">
-            <label>Описание</label>
-            <textarea class="form-textarea" id="create-desc" placeholder="Подробное описание проблемы, шаги воспроизведения, ожидаемое поведение..."></textarea>
+            <label>Описание <span style="font-size:11px;color:var(--text-muted);font-weight:400">(Markdown)</span></label>
+            <div class="md-editor-wrap" style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden">
+              ${mdToolbarHtml('create-desc')}
+              <textarea class="form-textarea" id="create-desc" placeholder="Подробное описание... Поддерживается **жирный**, _курсив_, \`код\`, списки и др."></textarea>
+              <div class="md-preview markdown-body" style="display:none;padding:14px 18px;min-height:80px"></div>
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -3159,6 +3168,10 @@ const App = {
         document.getElementById('create-emoji-btn').textContent = emoji;
       });
     });
+
+    // Bind markdown toolbar for description
+    const createMdToolbar = document.querySelector('#create-desc')?.closest('.md-editor-wrap')?.querySelector('.md-toolbar');
+    if (createMdToolbar) bindMdToolbar(createMdToolbar, 'create-desc');
 
     // Submit
     document.getElementById('create-submit').addEventListener('click', async () => {
@@ -3293,11 +3306,23 @@ function esc(str) {
 }
 
 // ========== Markdown Rendering ==========
+const _mdRenderer = (() => {
+  if (typeof marked === 'undefined') return null;
+  const renderer = new marked.Renderer();
+  const origLink = renderer.link.bind(renderer);
+  renderer.link = function({ href, title, tokens }) {
+    const text = this.parser.parseInline(tokens);
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
+  };
+  return renderer;
+})();
+
 function renderMarkdown(text) {
   if (!text) return '';
   if (typeof marked === 'undefined') return esc(text);
   try {
-    const html = marked.parse(text, { breaks: true, gfm: true });
+    const html = marked.parse(text, { breaks: true, gfm: true, renderer: _mdRenderer });
     if (typeof DOMPurify !== 'undefined') {
       return DOMPurify.sanitize(html, {
         ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
