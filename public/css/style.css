@@ -2570,6 +2570,27 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   flex-shrink: 0;
 }
 
+.thread-new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--danger, #e74c3c);
+  margin-left: 4px;
+  line-height: 1.4;
+  animation: thread-badge-pop 0.3s ease;
+}
+
+@keyframes thread-badge-pop {
+  0% { transform: scale(0); opacity: 0; }
+  60% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 .thread-replies-container {
   margin-top: 10px;
   padding: 12px;

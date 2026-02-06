@@ -2084,7 +2084,14 @@ app.get('/api/tickets/:id/messages/poll', authMiddleware, (req, res) => {
   for (const m of messages) {
     applyMaskToMessageAuthor(m, req.user);
   }
-  res.json({ messages });
+
+  // Include thread reply counts for megathreads
+  let replyCounts = null;
+  if (ticket.is_megathread) {
+    replyCounts = db.getThreadReplyCountsForTicket(ticketId);
+  }
+
+  res.json({ messages, replyCounts });
 });
 
 // --- Config (public) ---
@@ -2457,6 +2464,54 @@ function applyMaskToMessageAuthor(msg, viewer) {
     const masked = maskUserForPublic(src, true);
     msg.author_first_name = masked.first_name;
     msg.author_photo = masked.photo_url;
+  }
+}
+
+function applyMaskToPresetAuthor(preset, viewer) {
+  const viewerIsAdmin = !!viewer?.is_admin;
+  const isSelf = preset.author_id === viewer?.id;
+
+  const src = {
+    id: preset.author_id,
+    first_name: preset.author_first_name,
+    username: preset.author_username,
+    photo_url: preset.author_photo,
+    display_name: preset.author_display_name || null,
+    display_avatar: preset.author_display_avatar || null,
+    privacy_hidden: !!preset.author_privacy_hidden,
+  };
+
+  if (!viewerIsAdmin && !isSelf) {
+    if (src.privacy_hidden) {
+      preset.author_first_name = 'Скрытый пользователь';
+      preset.author_username = null;
+      preset.author_photo = null;
+    } else {
+      const masked = maskUserForPublic(src, false);
+      preset.author_first_name = masked.first_name;
+      preset.author_username = masked.username;
+      preset.author_photo = masked.photo_url;
+    }
+  } else if (isSelf && !viewerIsAdmin) {
+    const masked = maskUserForPublic(src, false);
+    preset.author_first_name = masked.first_name;
+    preset.author_username = masked.username;
+    preset.author_photo = masked.photo_url;
+  }
+
+  if (!viewerIsAdmin) {
+    delete preset.author_display_name;
+    delete preset.author_display_avatar;
+    delete preset.author_privacy_hidden;
+  }
+
+  if (viewerIsAdmin) {
+    preset.author_fake_name = src.display_name || null;
+    preset.author_fake_avatar = src.display_avatar || null;
+    preset.author_privacy_hidden = !!src.privacy_hidden;
+    const masked = maskUserForPublic(src, true);
+    preset.author_first_name = masked.first_name;
+    preset.author_photo = masked.photo_url;
   }
 }
 

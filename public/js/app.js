@@ -1336,25 +1336,25 @@ const App = {
       renderRrFiles();
     });
 
-    // Paste images from clipboard (multiple)
+    // Paste files from clipboard (images, video, screen recordings, etc.)
     const msgArea = document.getElementById('rr-message');
     msgArea?.addEventListener('paste', (e) => {
       const items = Array.from(e.clipboardData?.items || []);
-      const imgs = items.filter(i => i.type.startsWith('image/'));
-      if (imgs.length === 0) return;
+      const fileItems = items.filter(i => i.kind === 'file');
+      if (fileItems.length === 0) return;
       e.preventDefault();
       const ts = Date.now();
       let idx = 0;
       const pastedFiles = [];
-      for (const item of imgs) {
+      for (const item of fileItems) {
         const blob = item.getAsFile();
         if (!blob) continue;
-        pastedFiles.push(makePastedImageFile(blob, ts, idx++));
+        pastedFiles.push(makePastedFile(blob, ts, idx++));
       }
       const accepted = filterOversizedFiles(pastedFiles, (msg, type) => this.toast(msg, type));
       for (const f of accepted) rrFiles.push(f);
       renderRrFiles();
-      if (accepted.length > 0) this.toast(`Добавлено изображений: ${accepted.length}`, 'success');
+      if (accepted.length > 0) this.toast(`Добавлено файлов: ${accepted.length}`, 'success');
     });
 
     document.getElementById('rr-submit')?.addEventListener('click', async () => {
@@ -1447,6 +1447,15 @@ const App = {
       container.innerHTML = this.renderTicketDetail(ticket);
       this.bindTicketDetail(ticket);
       this.renderReadingIndicator(ticket.id);
+      this._currentTicketObj = ticket;
+
+      // Initialize known reply counts for megathread +N badges
+      this._knownReplyCounts = {};
+      if (ticket.is_megathread) {
+        for (const m of (ticket.messages || [])) {
+          if (m.reply_count > 0) this._knownReplyCounts[m.id] = m.reply_count;
+        }
+      }
     } catch (e) {
       container.innerHTML = `<div class="empty-state"><h3>Ошибка</h3><p>${esc(e.message)}</p></div>`;
     }
@@ -1940,6 +1949,11 @@ const App = {
             this.showNewMessagesBadge(list);
           }
         }
+
+        // Update thread reply count badges for megathreads
+        if (data.replyCounts && this._knownReplyCounts) {
+          this.updateThreadReplyBadges(data.replyCounts);
+        }
       } catch {}
     }, 5000);
 
@@ -1973,26 +1987,26 @@ const App = {
         e.target.value = '';
       });
 
-      // Paste images from clipboard (Ctrl+V / Win+. emoji picker), supports multiple
+      // Paste files from clipboard (Ctrl+V): images, video, screen recordings, etc.
       messageInput.addEventListener('paste', async (e) => {
         const items = Array.from(e.clipboardData?.items || []);
-        const images = items.filter(i => i.type.startsWith('image/'));
+        const fileItems = items.filter(i => i.kind === 'file');
 
-        // Handle direct image blobs (Ctrl+V)
-        if (images.length > 0) {
+        // Handle direct file blobs (images, video, screen recordings)
+        if (fileItems.length > 0) {
           e.preventDefault();
           const ts = Date.now();
           let idx = 0;
           const pastedFiles = [];
-          for (const item of images) {
+          for (const item of fileItems) {
             const blob = item.getAsFile();
             if (!blob) continue;
-            pastedFiles.push(makePastedImageFile(blob, ts, idx++));
+            pastedFiles.push(makePastedFile(blob, ts, idx++));
           }
           const accepted = filterOversizedFiles(pastedFiles, (msg, type) => this.toast(msg, type));
           for (const f of accepted) selectedFiles.push(f);
           this.renderFilePreview(selectedFiles);
-          if (accepted.length > 0) this.toast(`Добавлено изображений: ${accepted.length}`, 'success');
+          if (accepted.length > 0) this.toast(`Добавлено файлов: ${accepted.length}`, 'success');
           return;
         }
 
@@ -2007,7 +2021,6 @@ const App = {
         this.toast('Загрузка GIF...', 'info');
         try {
           const result = await this.api('POST', '/api/gif-proxy', { url: gifUrl });
-          // Create a virtual file object that the upload flow understands
           const gifFile = { _isProxied: true, ...result };
           selectedFiles.push(gifFile);
           this.renderFilePreview(selectedFiles);
@@ -2216,9 +2229,20 @@ const App = {
     container.style.display = 'block';
     container.innerHTML = '<div class="loading" style="padding:8px"><div class="spinner" style="width:20px;height:20px"></div></div>';
 
+    // Clear +N badge when thread is opened
+    const indicator = document.querySelector(`.thread-reply-indicator[data-msg-id="${msgId}"]`);
+    if (indicator) {
+      const badge = indicator.querySelector('.thread-new-badge');
+      if (badge) badge.remove();
+    }
+
     try {
       const data = await this.api('GET', `/api/messages/${msgId}/replies`);
       const replies = data.replies || [];
+      // Update known reply count to current actual count
+      if (this._knownReplyCounts) {
+        this._knownReplyCounts[msgId] = replies.length;
+      }
 
       const repliesHtml = replies.map(r => {
         const avatarHtml = r.author_photo
@@ -2514,6 +2538,69 @@ const App = {
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     document.body.appendChild(badge);
+  },
+
+  updateThreadReplyBadges(replyCounts) {
+    for (const [msgId, count] of Object.entries(replyCounts)) {
+      const known = this._knownReplyCounts[msgId] || 0;
+      const diff = count - known;
+
+      // Update the reply count text in the indicator
+      const indicator = document.querySelector(`.thread-reply-indicator[data-msg-id="${msgId}"]`);
+
+      if (!indicator) {
+        // No indicator yet — message had 0 replies, now has some. Create indicator.
+        if (count > 0) {
+          const msgEl = document.querySelector(`.message[data-msg-id="${msgId}"]`);
+          if (msgEl) {
+            const reactionsEl = msgEl.querySelector('.message-reactions');
+            const containerEl = msgEl.querySelector('.thread-replies-container');
+            if (reactionsEl && containerEl) {
+              const pluralized = count === 1 ? 'ответ' : count < 5 ? 'ответа' : 'ответов';
+              const newIndicator = document.createElement('div');
+              newIndicator.className = 'thread-reply-indicator';
+              newIndicator.dataset.msgId = msgId;
+              newIndicator.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+                <span>${count} ${pluralized}</span>
+                ${diff > 0 ? `<span class="thread-new-badge">+${diff}</span>` : ''}
+              `;
+              containerEl.parentNode.insertBefore(newIndicator, containerEl);
+              // Bind click
+              newIndicator.addEventListener('click', () => {
+                this.toggleThreadReplies(msgId, this._currentTicketObj);
+              });
+              if (diff > 0 && !this._knownReplyCounts[msgId]) {
+                this._knownReplyCounts[msgId] = known; // keep old known so badge persists
+              }
+            }
+          }
+        }
+        continue;
+      }
+
+      // Update reply count text
+      const span = indicator.querySelector('span:not(.thread-new-badge)');
+      if (span) {
+        const pluralized = count === 1 ? 'ответ' : count < 5 ? 'ответа' : 'ответов';
+        span.textContent = `${count} ${pluralized}`;
+      }
+
+      // Show/update +N badge if there are new replies
+      if (diff > 0) {
+        let badge = indicator.querySelector('.thread-new-badge');
+        // Also add to existing accumulated diff if badge already exists
+        const existingDiff = badge ? parseInt(badge.textContent.replace('+', '')) || 0 : 0;
+        const totalNew = diff;
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'thread-new-badge';
+          indicator.appendChild(badge);
+        }
+        badge.textContent = `+${totalNew}`;
+        // Don't update _knownReplyCounts here — keep showing the badge until thread is opened
+      }
+    }
   },
 
   renderTypingIndicator(typers) {
@@ -3885,13 +3972,22 @@ function getAttachmentName(file, idx = 0) {
   return file?._preferredName || file?.original_name || file?.name || `attachment-${Date.now()}-${idx}.png`;
 }
 
-function makePastedImageFile(blob, ts, idx) {
-  const extRaw = (blob?.type || 'image/png').split('/')[1] || 'png';
-  const ext = extRaw.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+function makePastedFile(blob, ts, idx) {
+  const mime = blob?.type || 'application/octet-stream';
+  // Map common MIME types to clean extensions
+  const mimeToExt = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif',
+    'image/webp': 'webp', 'image/bmp': 'bmp', 'image/svg+xml': 'svg',
+    'video/mp4': 'mp4', 'video/webm': 'webm', 'video/x-matroska': 'webm',
+    'video/quicktime': 'mp4', 'video/avi': 'mp4',
+    'application/pdf': 'pdf', 'text/plain': 'txt',
+    'application/json': 'json', 'application/xml': 'xml',
+  };
+  const ext = mimeToExt[mime] || mime.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'bin';
   const name = `pasted-${ts}-${idx}.${ext}`;
 
   try {
-    return new File([blob], name, { type: blob.type || 'image/png' });
+    return new File([blob], name, { type: mime });
   } catch {
     // Fallback for environments where File constructor is limited
     blob._preferredName = name;
