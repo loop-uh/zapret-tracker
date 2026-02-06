@@ -366,7 +366,7 @@ function getTicketById(id) {
   return ticket;
 }
 
-function getTickets({ status, type, priority, author_id, is_admin, user_id, search, tag_id, is_resource_request, sort, page = 1, limit = 50 }) {
+function getTickets({ status, type, priority, author_id, is_admin, user_id, search, tag_id, is_resource_request, exclude_archived, only_archived, sort, page = 1, limit = 50 }) {
   const db = getDb();
   let where = [];
   let params = [];
@@ -403,6 +403,12 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
   if (is_resource_request !== undefined) {
     where.push('t.is_resource_request = ?');
     params.push(is_resource_request ? 1 : 0);
+  }
+  if (exclude_archived) {
+    where.push("t.status NOT IN ('closed', 'rejected', 'duplicate')");
+  }
+  if (only_archived) {
+    where.push("t.status IN ('closed', 'rejected', 'duplicate')");
   }
 
   const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';

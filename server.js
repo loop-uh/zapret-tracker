@@ -29,23 +29,16 @@ app.use(express.urlencoded({ extended: true }));
 // Cache-bust version — changes on every server restart to defeat Telegram WebApp cache
 const APP_VERSION = Date.now().toString(36);
 
-app.use(express.static(path.join(__dirname, 'public'), {
-  etag: false,
-  lastModified: false,
-  setHeaders(res, filePath) {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-  },
-}));
-
-// Serve index.html with cache-busting query params on JS/CSS
+// Serve index.html BEFORE static middleware — with cache-busting and no-cache headers
 app.get('/', (req, res) => {
   const html = `<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Zapret Tracker — Баги и Идеи</title>
   <link rel="stylesheet" href="/css/style.css?v=${APP_VERSION}">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡</text></svg>">
@@ -57,10 +50,23 @@ app.get('/', (req, res) => {
   <script src="/js/app.js?v=${APP_VERSION}"><\/script>
 </body>
 </html>`;
-  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.send(html);
 });
+
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  index: false, // Don't serve index.html from static — our route above handles it
+  setHeaders(res, filePath) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  },
+}));
 app.use('/uploads', express.static(CONFIG.uploadDir, {
   maxAge: '30d',
   setHeaders(res, filePath) {
@@ -562,10 +568,12 @@ app.post('/api/auth/logout', authMiddleware, (req, res) => {
 // --- Tickets ---
 
 app.get('/api/tickets', authMiddleware, (req, res) => {
-  const { status, type, priority, author_id, search, tag_id, page, is_resource_request, sort, group_by } = req.query;
+  const { status, type, priority, author_id, search, tag_id, page, is_resource_request, sort, group_by, exclude_archived, only_archived } = req.query;
   const result = db.getTickets({
     status, type, priority, author_id, search, tag_id,
     is_resource_request: is_resource_request !== undefined ? parseInt(is_resource_request) : undefined,
+    exclude_archived: exclude_archived === '1',
+    only_archived: only_archived === '1',
     sort: sort || undefined,
     page: parseInt(page) || 1,
     is_admin: req.user.is_admin,
@@ -815,6 +823,11 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
   // Access check: private tickets are restricted
   if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
     return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Archived tickets: no new messages (admins can still comment)
+  if (['closed', 'rejected', 'duplicate'].includes(ticket.status) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Тикет закрыт — отправка сообщений недоступна' });
   }
 
   // Public tickets: anyone can comment (no extra restrictions)

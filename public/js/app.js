@@ -283,6 +283,10 @@ const App = {
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 2h3.5v12h-3.5V2zm5 0h3.5v8h-3.5V2zm5 0h3v10h-3V2z"/></svg>
               Канбан
             </button>
+            <button class="nav-btn ${this.currentView === 'archive' ? 'active' : ''}" data-nav="archive">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+              Архив
+            </button>
             <button class="nav-btn ${this.currentView === 'resource' ? 'active' : ''}" data-nav="resource">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7l8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
               Добавление своих сайтов/игр
@@ -379,6 +383,7 @@ const App = {
 
     switch (view) {
       case 'list': this.renderListView(content); break;
+      case 'archive': this.renderArchiveView(content); break;
       case 'kanban': this.renderKanbanView(content); break;
       case 'resource': this.renderResourceRequestView(content); break;
       case 'ticket': this.renderTicketView(content, data); break;
@@ -411,6 +416,7 @@ const App = {
     try {
       const params = new URLSearchParams();
       params.set('is_resource_request', '0');
+      params.set('exclude_archived', '1');
       if (saved.type) params.set('type', saved.type);
       if (saved.status) params.set('status', saved.status);
       if (saved.priority) params.set('priority', saved.priority);
@@ -472,8 +478,6 @@ const App = {
           <option value="in_progress" ${sel('in_progress', saved.status)}>В работе</option>
           <option value="review" ${sel('review', saved.status)}>На ревью</option>
           <option value="testing" ${sel('testing', saved.status)}>Тестирование</option>
-          <option value="closed" ${sel('closed', saved.status)}>Закрыто</option>
-          <option value="rejected" ${sel('rejected', saved.status)}>Отклонено</option>
         </select>
         <select class="filter-select" id="filter-priority">
           <option value="">Все приоритеты</option>
@@ -535,6 +539,7 @@ const App = {
 
       const params = new URLSearchParams();
       params.set('is_resource_request', '0');
+      params.set('exclude_archived', '1');
       if (filters.search) params.set('search', filters.search);
       if (filters.type) params.set('type', filters.type);
       if (filters.status) params.set('status', filters.status);
@@ -573,6 +578,45 @@ const App = {
       this.saveFilters({});
       doFilter();
     });
+  },
+
+  // ========== Archive View ==========
+  async renderArchiveView(container) {
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+      const params = new URLSearchParams();
+      params.set('is_resource_request', '0');
+      params.set('only_archived', '1');
+      if (this._archiveSearch) params.set('search', this._archiveSearch);
+      const data = await this.api('GET', `/api/tickets?${params}`);
+      container.innerHTML = `
+        <div style="margin-bottom:16px">
+          <h2 style="margin-bottom:4px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+            Архив (${data.total})
+          </h2>
+          <p style="color:var(--text-muted);font-size:13px">Закрытые, отклонённые и дублированные тикеты. Ответить на них нельзя.</p>
+        </div>
+        <div class="toolbar" style="margin-bottom:12px">
+          <input class="search-input" type="text" placeholder="Поиск в архиве..." id="archive-search-input" value="${esc(this._archiveSearch || '')}">
+        </div>
+        <div id="ticket-list" class="ticket-list">
+          ${this.renderTicketList(data.tickets)}
+        </div>
+        ${data.total > data.limit ? this.renderPagination(data) : ''}
+      `;
+      this.bindTicketList();
+      let debounce = null;
+      document.getElementById('archive-search-input')?.addEventListener('input', (e) => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          this._archiveSearch = e.target.value;
+          this.renderArchiveView(container);
+        }, 300);
+      });
+    } catch (e) {
+      container.innerHTML = `<div class="empty-state"><h3>Ошибка</h3><p>${esc(e.message)}</p></div>`;
+    }
   },
 
   renderGroupedTicketList(tickets, groupBy) {
@@ -1064,6 +1108,12 @@ const App = {
                 ${(t.messages || []).map(m => this.renderMessage(m)).join('')}
               </div>
 
+              ${['closed', 'rejected', 'duplicate'].includes(t.status) ? `
+              <div class="message-form-closed" style="text-align:center;padding:20px;color:var(--text-muted);border:1px dashed var(--border);border-radius:var(--radius-lg);margin-top:8px">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+                Тикет закрыт — отправка сообщений недоступна
+              </div>
+              ` : `
               <div class="message-form" id="message-form">
                 <textarea class="message-textarea" id="message-input" placeholder="Написать сообщение... (Ctrl+Enter для отправки)"></textarea>
                 <div class="file-preview-list" id="file-preview-list"></div>
@@ -1078,6 +1128,7 @@ const App = {
                   <button class="btn btn-primary" id="send-message-btn">Отправить</button>
                 </div>
               </div>
+              `}
             </div>
           </div>
 
