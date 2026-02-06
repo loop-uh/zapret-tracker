@@ -682,6 +682,15 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   margin-bottom: 8px;
 }
 
+#edit-desc-btn {
+  opacity: 0;
+  transition: opacity .15s;
+}
+
+.ticket-description-wrap:hover #edit-desc-btn {
+  opacity: 1;
+}
+
 .ticket-description {
   font-size: 14px;
   line-height: 1.8;

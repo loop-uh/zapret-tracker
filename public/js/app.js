@@ -1409,8 +1409,11 @@ const App = {
                   <div class="ticket-description-author">
                     <span class="message-author">${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
                     <span class="message-date">${timeAgo(t.created_at)}</span>
+                    ${canEdit ? `<button class="msg-action-btn" id="edit-desc-btn" title="Редактировать описание" style="margin-left:auto">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>` : ''}
                   </div>
-                  <div class="ticket-description markdown-body">${t.description ? renderMarkdown(t.description) : '<span style="color:var(--text-muted)">Нет описания</span>'}</div>
+                  <div class="ticket-description markdown-body" id="ticket-desc-content" data-raw="${esc(t.description || '')}">${t.description ? renderMarkdown(t.description) : '<span style="color:var(--text-muted)">Нет описания</span>'}</div>
                   ${attachmentsHtml ? `<div class="ticket-attachments">${attachmentsHtml}</div>` : ''}
                 </div>
               </div>
@@ -1661,6 +1664,79 @@ const App = {
       };
       input.addEventListener('blur', save);
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') this.navigate('ticket', { id: ticket.id }); });
+    });
+
+    // Edit description inline
+    document.getElementById('edit-desc-btn')?.addEventListener('click', () => {
+      const descEl = document.getElementById('ticket-desc-content');
+      if (!descEl) return;
+      const editBtn = document.getElementById('edit-desc-btn');
+
+      const currentRaw = descEl.dataset.raw || '';
+
+      // Create edit wrapper
+      const editWrap = document.createElement('div');
+      editWrap.className = 'md-editor-wrap';
+      const taId = 'edit-desc-textarea';
+      editWrap.innerHTML = mdToolbarHtml(taId);
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'message-edit-textarea';
+      textarea.id = taId;
+      textarea.value = currentRaw;
+      textarea.placeholder = 'Описание тикета... Поддерживается Markdown';
+      textarea.style.minHeight = '100px';
+
+      const previewDiv = document.createElement('div');
+      previewDiv.className = 'md-preview markdown-body';
+      previewDiv.style.display = 'none';
+
+      editWrap.appendChild(textarea);
+      editWrap.appendChild(previewDiv);
+
+      const btnRow = document.createElement('div');
+      btnRow.className = 'message-edit-actions';
+      btnRow.innerHTML = `
+        <button class="btn btn-primary btn-sm desc-save-btn">Сохранить</button>
+        <button class="btn btn-sm desc-cancel-btn">Отмена</button>
+      `;
+
+      descEl.style.display = 'none';
+      if (editBtn) editBtn.style.display = 'none';
+      descEl.parentNode.insertBefore(editWrap, descEl.nextSibling);
+      descEl.parentNode.insertBefore(btnRow, editWrap.nextSibling);
+      textarea.focus();
+
+      // Bind toolbar
+      const toolbar = editWrap.querySelector('.md-toolbar');
+      if (toolbar) bindMdToolbar(toolbar, textarea);
+
+      const cancel = () => {
+        editWrap.remove();
+        btnRow.remove();
+        descEl.style.display = '';
+        if (editBtn) editBtn.style.display = '';
+      };
+
+      btnRow.querySelector('.desc-cancel-btn').addEventListener('click', cancel);
+
+      textarea.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') cancel();
+        if (ev.key === 'Enter' && ev.ctrlKey) btnRow.querySelector('.desc-save-btn').click();
+      });
+
+      btnRow.querySelector('.desc-save-btn').addEventListener('click', async () => {
+        const newDesc = textarea.value.trim();
+        try {
+          await this.api('PUT', `/api/tickets/${ticket.id}`, { description: newDesc });
+          descEl.innerHTML = newDesc ? renderMarkdown(newDesc) : '<span style="color:var(--text-muted)">Нет описания</span>';
+          descEl.dataset.raw = newDesc;
+          cancel();
+          this.toast('Описание обновлено', 'success');
+        } catch (e) {
+          this.toast(e.message, 'error');
+        }
+      });
     });
 
     // Emoji picker
