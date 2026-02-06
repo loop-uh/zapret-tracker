@@ -7,8 +7,16 @@
   <link rel="stylesheet" href="/css/style.css">
   <link rel="icon" type="image/x-icon" href="/img/Zapret2.ico">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    // Telegram WebApp JS leaks module/exports globals which breaks UMD detection in libraries
+    var __savedModule = window.module, __savedExports = window.exports;
+    window.module = undefined; window.exports = undefined;
+  </script>
   <script src="/js/marked.min.js"></script>
   <script src="/js/purify.min.js"></script>
+  <script>
+    window.module = __savedModule; window.exports = __savedExports;
+  </script>
 </head>
 <body>
   <div id="app"></div>
