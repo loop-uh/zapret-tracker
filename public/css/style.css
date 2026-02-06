@@ -827,11 +827,15 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .attachment:hover { border-color: var(--accent); text-decoration: none; box-shadow: 0 0 8px var(--accent-glow); }
 
 .attachment-preview {
-  max-width: 200px;
-  max-height: 150px;
+  width: 200px;
+  height: 150px;
   border-radius: var(--radius);
-  object-fit: cover;
   border: 1px solid var(--border);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  cursor: zoom-in;
+  display: inline-block;
 }
 
 /* ========== Message Actions ========== */

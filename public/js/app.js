@@ -1325,7 +1325,7 @@ const App = {
 
     const attachmentsHtml = (t.attachments || []).map(a => {
       if (isImageAttachment(a)) {
-        return `<img src="/uploads/${a.filename}" class="attachment-preview lightbox-trigger" alt="${esc(a.original_name)}" style="cursor:zoom-in">`;
+        return `<div class="attachment-preview lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" style="background-image:url('/uploads/${a.filename}')"></div>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)}</a>`;
     }).join('');
@@ -1860,7 +1860,7 @@ const App = {
 
     const attachmentsHtml = (m.attachments || []).map(a => {
       if (isImageAttachment(a)) {
-        return `<img src="/uploads/${a.filename}" class="attachment-preview lightbox-trigger" alt="${esc(a.original_name)}" style="cursor:zoom-in">`;
+        return `<div class="attachment-preview lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" style="background-image:url('/uploads/${a.filename}')"></div>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
     }).join('');
@@ -3016,17 +3016,32 @@ function isImageAttachment(att) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 }
 
-// Broken image previews: fall back to a text placeholder
-document.addEventListener('error', (e) => {
-  const el = e.target;
-  if (!el || el.tagName !== 'IMG') return;
-  if (!el.classList || !el.classList.contains('attachment-preview')) return;
-  const name = el.getAttribute('alt') || 'attachment';
-  const span = document.createElement('span');
-  span.className = 'attachment';
-  span.textContent = `\u{1F4CE} ${name}`;
-  el.replaceWith(span);
-}, true);
+// Broken background-image previews: detect load failures via hidden probe img
+(function() {
+  const observer = new MutationObserver((mutations) => {
+    for (const mut of mutations) {
+      for (const node of mut.addedNodes) {
+        if (!node.querySelectorAll) continue;
+        const previews = node.classList && node.classList.contains('attachment-preview')
+          ? [node] : node.querySelectorAll('.attachment-preview');
+        previews.forEach(el => {
+          const src = el.dataset.src;
+          if (!src) return;
+          const probe = new Image();
+          probe.onerror = () => {
+            const name = el.dataset.alt || 'attachment';
+            const span = document.createElement('span');
+            span.className = 'attachment';
+            span.textContent = `\u{1F4CE} ${name}`;
+            el.replaceWith(span);
+          };
+          probe.src = src;
+        });
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+})();
 
 // ========== Image Lightbox ==========
 (function() {
@@ -3037,6 +3052,10 @@ document.addEventListener('error', (e) => {
 
   const lbImg = overlay.querySelector('img');
   const lbClose = overlay.querySelector('.lightbox-close');
+
+  // Block context menu on lightbox image to prevent URL leak
+  lbImg.addEventListener('contextmenu', (e) => e.preventDefault());
+  lbImg.setAttribute('draggable', 'false');
 
   function openLightbox(src) {
     lbImg.src = src;
@@ -3059,10 +3078,11 @@ document.addEventListener('error', (e) => {
   });
 
   document.addEventListener('click', (e) => {
-    const img = e.target.closest('img.lightbox-trigger');
-    if (img) {
+    const trigger = e.target.closest('.lightbox-trigger');
+    if (trigger) {
       e.preventDefault();
-      openLightbox(img.src);
+      const src = trigger.dataset.src || trigger.src;
+      if (src) openLightbox(src);
     }
   });
 })();

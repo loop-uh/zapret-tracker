@@ -93,6 +93,17 @@ function init() {
       FOREIGN KEY (author_id) REFERENCES users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS message_reactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      emoji TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(message_id, user_id, emoji),
+      FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS attachments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ticket_id INTEGER,
@@ -152,6 +163,8 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_subscriptions_ticket ON subscriptions(ticket_id);
     CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_tokens_created ON auth_tokens(created_at);
+    CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON message_reactions(message_id);
+    CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON message_reactions(user_id);
   `);
 
   // Insert default tags
@@ -656,6 +669,52 @@ function deleteMessage(id) {
   db.prepare('DELETE FROM messages WHERE id = ?').run(id);
 }
 
+// ========== Message Reactions ==========
+
+function toggleReaction(messageId, userId, emoji) {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?').get(messageId, userId, emoji);
+
+  if (existing) {
+    db.prepare('DELETE FROM message_reactions WHERE id = ?').run(existing.id);
+    return { added: false };
+  } else {
+    db.prepare('INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?)').run(messageId, userId, emoji);
+    return { added: true };
+  }
+}
+
+function getReactionsForMessage(messageId) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT mr.emoji, mr.user_id, u.first_name, u.username, u.display_name, u.privacy_hidden
+    FROM message_reactions mr
+    JOIN users u ON mr.user_id = u.id
+    WHERE mr.message_id = ?
+    ORDER BY mr.created_at ASC
+  `).all(messageId);
+}
+
+function getReactionsForMessages(messageIds) {
+  if (!messageIds || messageIds.length === 0) return {};
+  const db = getDb();
+  const placeholders = messageIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT mr.message_id, mr.emoji, mr.user_id, u.first_name, u.username, u.display_name, u.privacy_hidden
+    FROM message_reactions mr
+    JOIN users u ON mr.user_id = u.id
+    WHERE mr.message_id IN (${placeholders})
+    ORDER BY mr.created_at ASC
+  `).all(...messageIds);
+
+  const result = {};
+  for (const row of rows) {
+    if (!result[row.message_id]) result[row.message_id] = [];
+    result[row.message_id].push(row);
+  }
+  return result;
+}
+
 // ========== Attachments ==========
 
 function addAttachment({ ticket_id, message_id, filename, original_name, mime_type, size }) {
@@ -856,6 +915,10 @@ module.exports = {
   deleteMessage,
   // Attachments
   addAttachment,
+  // Message Reactions
+  toggleReaction,
+  getReactionsForMessage,
+  getReactionsForMessages,
   // Votes
   toggleVote,
   getUserVotes,

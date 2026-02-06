@@ -909,6 +909,13 @@ app.get('/api/tickets/:id', authMiddleware, (req, res) => {
   ticket.user_subscribed = db.isSubscribed(req.user.id, ticket.id);
   ticket.messages = db.getMessages(ticket.id);
 
+  // Attach reactions to messages
+  const msgIds = ticket.messages.map(m => m.id);
+  const allReactions = db.getReactionsForMessages(msgIds);
+  for (const m of ticket.messages) {
+    m.reactions = aggregateReactions(allReactions[m.id] || [], req.user);
+  }
+
   applyMaskToTicketAuthor(ticket, req.user);
   for (const m of ticket.messages) {
     applyMaskToMessageAuthor(m, req.user);
@@ -1295,6 +1302,9 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
     }
   }
 
+  // New message has no reactions yet
+  message.reactions = [];
+
   // Auto-subscribe commenter to this ticket
   db.subscribe(req.user.id, ticketId);
 
@@ -1358,6 +1368,33 @@ app.delete('/api/messages/:id', authMiddleware, (req, res) => {
 
   db.deleteMessage(msgId);
   res.json({ ok: true });
+});
+
+// --- Message Reactions ---
+
+app.post('/api/messages/:id/reactions', authMiddleware, (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const message = db.getMessageById(msgId);
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+
+  // Check ticket access
+  const ticket = db.getTicketById(message.ticket_id);
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { emoji } = req.body;
+  if (!emoji || typeof emoji !== 'string' || emoji.length > 10) {
+    return res.status(400).json({ error: 'Invalid emoji' });
+  }
+
+  const result = db.toggleReaction(msgId, req.user.id, emoji);
+
+  // Return updated reactions for this message
+  const rawReactions = db.getReactionsForMessage(msgId);
+  const reactions = aggregateReactions(rawReactions, req.user);
+  res.json({ ...result, reactions });
 });
 
 // --- File Upload to ticket ---
@@ -1742,6 +1779,16 @@ app.get('/api/tickets/:id/messages/poll', authMiddleware, (req, res) => {
   }
 
   const messages = db.getMessagesSince(ticketId, afterId);
+
+  // Attach reactions to polled messages
+  if (messages.length > 0) {
+    const msgIds = messages.map(m => m.id);
+    const allReactions = db.getReactionsForMessages(msgIds);
+    for (const m of messages) {
+      m.reactions = aggregateReactions(allReactions[m.id] || [], req.user);
+    }
+  }
+
   for (const m of messages) {
     applyMaskToMessageAuthor(m, req.user);
   }
@@ -2002,6 +2049,29 @@ function statusLabel(status) {
     duplicate: 'Дубликат',
   };
   return labels[status] || status;
+}
+
+// Aggregate raw reaction rows into a compact format: [{ emoji, count, users: [{id, name}], user_reacted: bool }]
+function aggregateReactions(rawReactions, viewer) {
+  const map = new Map(); // emoji -> { count, users, user_reacted }
+  for (const r of rawReactions) {
+    if (!map.has(r.emoji)) {
+      map.set(r.emoji, { emoji: r.emoji, count: 0, users: [], user_reacted: false });
+    }
+    const entry = map.get(r.emoji);
+    entry.count++;
+
+    const displayName = (viewer && viewer.is_admin)
+      ? (r.first_name || r.username || 'Unknown')
+      : (r.display_name || r.first_name || r.username || 'Unknown');
+
+    entry.users.push({ id: r.user_id, name: r.privacy_hidden && !(viewer && viewer.is_admin) && r.user_id !== viewer?.id ? 'Скрытый пользователь' : displayName });
+
+    if (viewer && r.user_id === viewer.id) {
+      entry.user_reacted = true;
+    }
+  }
+  return Array.from(map.values());
 }
 
 function escHtml(str) {
