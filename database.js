@@ -351,7 +351,9 @@ function createTicket({
 function getTicketById(id) {
   const db = getDb();
   const ticket = db.prepare(`
-    SELECT t.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+    SELECT t.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden,
            a.username as assignee_username, a.first_name as assignee_first_name
     FROM tickets t
     JOIN users u ON t.author_id = u.id
@@ -450,7 +452,9 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
   }
 
   const tickets = db.prepare(`
-    SELECT t.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+    SELECT t.*,
+    u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+    u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden,
     (SELECT COUNT(*) FROM messages m WHERE m.ticket_id = t.id AND m.is_system = 0) as message_count
     FROM tickets t
     JOIN users u ON t.author_id = u.id
@@ -522,7 +526,9 @@ function addMessage({ ticket_id, author_id, content, is_system = false }) {
   db.prepare('UPDATE tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(ticket_id);
 
   return db.prepare(`
-    SELECT m.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin
+    SELECT m.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
     FROM messages m JOIN users u ON m.author_id = u.id WHERE m.id = ?
   `).get(result.lastInsertRowid);
 }
@@ -530,7 +536,9 @@ function addMessage({ ticket_id, author_id, content, is_system = false }) {
 function getMessages(ticket_id) {
   const db = getDb();
   const messages = db.prepare(`
-    SELECT m.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin
+    SELECT m.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
     FROM messages m
     JOIN users u ON m.author_id = u.id
     WHERE m.ticket_id = ?
@@ -547,7 +555,9 @@ function getMessages(ticket_id) {
 
 function getMessageById(id) {
   return getDb().prepare(`
-    SELECT m.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin
+    SELECT m.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
     FROM messages m JOIN users u ON m.author_id = u.id WHERE m.id = ?
   `).get(id);
 }
@@ -662,7 +672,9 @@ function updateUserSettings(userId, settings) {
 function getMessagesSince(ticketId, afterId) {
   const db = getDb();
   const messages = db.prepare(`
-    SELECT m.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin
+    SELECT m.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
     FROM messages m
     JOIN users u ON m.author_id = u.id
     WHERE m.ticket_id = ? AND m.id > ?

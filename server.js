@@ -476,6 +476,9 @@ function getTypingInTicket(ticketId, excludeUserId) {
       photo_url: entry.user.photo_url,
       display_name: entry.user.display_name || null,
       display_avatar: entry.user.display_avatar || null,
+      privacy_hidden: !!entry.user.privacy_hidden,
+      privacy_hide_online: !!entry.user.privacy_hide_online,
+      privacy_hide_activity: !!entry.user.privacy_hide_activity,
     });
   }
   if (map.size === 0) typingUsers.delete(ticketId);
@@ -734,6 +737,11 @@ app.get('/api/tickets', authMiddleware, (req, res) => {
     user_voted: userVotes.includes(t.id),
     user_subscribed: userSubs.includes(t.id),
   }));
+
+  // Apply privacy masking to ticket authors
+  for (const t of result.tickets) {
+    applyMaskToTicketAuthor(t, req.user);
+  }
   res.json(result);
 });
 
@@ -749,7 +757,11 @@ app.get('/api/tickets/kanban', authMiddleware, (req, res) => {
       user_id: req.user.id,
       limit: 100,
     });
-    result[status] = data.tickets.map(t => ({ ...t, user_voted: userVotes.includes(t.id) }));
+    result[status] = data.tickets.map(t => {
+      const row = { ...t, user_voted: userVotes.includes(t.id) };
+      applyMaskToTicketAuthor(row, req.user);
+      return row;
+    });
   }
 
   res.json(result);
@@ -767,6 +779,11 @@ app.get('/api/tickets/:id', authMiddleware, (req, res) => {
   ticket.user_voted = userVotes.includes(ticket.id);
   ticket.user_subscribed = db.isSubscribed(req.user.id, ticket.id);
   ticket.messages = db.getMessages(ticket.id);
+
+  applyMaskToTicketAuthor(ticket, req.user);
+  for (const m of ticket.messages) {
+    applyMaskToMessageAuthor(m, req.user);
+  }
 
   res.json(ticket);
 });
@@ -817,6 +834,7 @@ app.post('/api/tickets', authMiddleware, (req, res) => {
     );
   }
 
+  applyMaskToTicketAuthor(ticket, req.user);
   res.json(ticket);
 });
 
@@ -867,6 +885,7 @@ app.put('/api/tickets/:id', authMiddleware, (req, res) => {
   }
 
   const updated = db.updateTicket(parseInt(req.params.id), updates);
+  applyMaskToTicketAuthor(updated, req.user);
   res.json(updated);
 });
 
@@ -1034,6 +1053,7 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
     `${content ? escHtml(content.substring(0, 300)) : '[файлы]'}`
   );
 
+  applyMaskToMessageAuthor(message, req.user);
   res.json(message);
 });
 
@@ -1060,6 +1080,7 @@ app.put('/api/messages/:id', authMiddleware, (req, res) => {
   }
 
   const updated = db.updateMessage(msgId, content.trim());
+  applyMaskToMessageAuthor(updated, req.user);
   res.json(updated);
 });
 
@@ -1213,12 +1234,20 @@ app.post('/api/presence/typing', authMiddleware, (req, res) => {
 // Get who is typing in a specific ticket
 app.get('/api/presence/typing/:ticketId', authMiddleware, (req, res) => {
   const tid = parseInt(req.params.ticketId);
-  const typers = getTypingInTicket(tid, req.user.id).map(u => ({
-    id: u.id,
-    first_name: u.display_name || u.first_name,
-    username: u.display_name ? null : u.username,
-    photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
-  }));
+  const isAdmin = !!req.user.is_admin;
+  const raw = getTypingInTicket(tid, req.user.id);
+  const typers = raw
+    .filter(u => {
+      if (isAdmin) return true;
+      if (u.privacy_hidden || u.privacy_hide_online || u.privacy_hide_activity) return false;
+      return true;
+    })
+    .map(u => ({
+      id: u.id,
+      first_name: u.display_name || u.first_name,
+      username: u.display_name ? null : u.username,
+      photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
+    }));
   res.json({ typing: typers });
 });
 
@@ -1364,6 +1393,9 @@ app.get('/api/tickets/:id/messages/poll', authMiddleware, (req, res) => {
   }
 
   const messages = db.getMessagesSince(ticketId, afterId);
+  for (const m of messages) {
+    applyMaskToMessageAuthor(m, req.user);
+  }
   res.json({ messages });
 });
 
@@ -1520,6 +1552,75 @@ function maskUserForPublic(user, viewerIsAdmin) {
     username: user.display_name ? null : user.username, // hide username if custom name set
     photo_url: user.display_avatar === 'hidden' ? null : (user.display_avatar || user.photo_url),
   };
+}
+
+function applyMaskToTicketAuthor(ticket, viewer) {
+  const viewerIsAdmin = !!viewer?.is_admin;
+  const isSelf = ticket.author_id === viewer?.id;
+
+  const src = {
+    id: ticket.author_id,
+    first_name: ticket.author_first_name,
+    username: ticket.author_username,
+    photo_url: ticket.author_photo,
+    display_name: ticket.author_display_name || null,
+    display_avatar: ticket.author_display_avatar || null,
+    privacy_hidden: !!ticket.author_privacy_hidden,
+  };
+
+  if (!viewerIsAdmin && !isSelf) {
+    if (src.privacy_hidden) {
+      ticket.author_first_name = 'Скрытый пользователь';
+      ticket.author_username = null;
+      ticket.author_photo = null;
+    } else {
+      const masked = maskUserForPublic(src, false);
+      ticket.author_first_name = masked.first_name;
+      ticket.author_username = masked.username;
+      ticket.author_photo = masked.photo_url;
+    }
+  }
+
+  // Admin: keep real fields; expose fake fields explicitly
+  if (viewerIsAdmin) {
+    ticket.author_fake_name = src.display_name || null;
+    ticket.author_fake_avatar = src.display_avatar || null;
+    ticket.author_privacy_hidden = !!src.privacy_hidden;
+  }
+}
+
+function applyMaskToMessageAuthor(msg, viewer) {
+  const viewerIsAdmin = !!viewer?.is_admin;
+  const isSelf = msg.author_id === viewer?.id;
+
+  const src = {
+    id: msg.author_id,
+    first_name: msg.author_first_name,
+    username: msg.author_username,
+    photo_url: msg.author_photo,
+    display_name: msg.author_display_name || null,
+    display_avatar: msg.author_display_avatar || null,
+    privacy_hidden: !!msg.author_privacy_hidden,
+  };
+
+  if (!viewerIsAdmin && !isSelf) {
+    if (src.privacy_hidden) {
+      msg.author_first_name = 'Скрытый пользователь';
+      msg.author_username = null;
+      msg.author_photo = null;
+    } else {
+      const masked = maskUserForPublic(src, false);
+      msg.author_first_name = masked.first_name;
+      msg.author_username = masked.username;
+      msg.author_photo = masked.photo_url;
+    }
+  }
+
+  if (viewerIsAdmin) {
+    msg.author_fake_name = src.display_name || null;
+    msg.author_fake_avatar = src.display_avatar || null;
+    msg.author_privacy_hidden = !!src.privacy_hidden;
+  }
 }
 
 function statusLabel(status) {

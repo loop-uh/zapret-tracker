@@ -301,6 +301,10 @@ const App = {
       this._onlineUsers = data.users;
       this._onlineCount = data.count;
       this.updateOnlineBadge();
+      // If on ticket view, refresh readers indicator
+      if (this.currentView === 'ticket') {
+        this.renderReadingIndicator();
+      }
       // If on users/online view, refresh
       if (this.currentView === 'online') {
         const content = document.getElementById('content');
@@ -447,10 +451,14 @@ const App = {
     const content = document.getElementById('content');
     if (!content) return;
 
-    // Cleanup typing poll from previous ticket view
+    // Cleanup typing poll and message poll from previous ticket view
     if (this._typingPollInterval) {
       clearInterval(this._typingPollInterval);
       this._typingPollInterval = null;
+    }
+    if (this._messagePollInterval) {
+      clearInterval(this._messagePollInterval);
+      this._messagePollInterval = null;
     }
 
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1118,9 +1126,11 @@ const App = {
       this._currentTicketId = ticket.id;
       this._currentTicketTitle = ticket.title;
       this.sendHeartbeat();
+      this.pollPresence();
 
       container.innerHTML = this.renderTicketDetail(ticket);
       this.bindTicketDetail(ticket);
+      this.renderReadingIndicator(ticket.id);
     } catch (e) {
       container.innerHTML = `<div class="empty-state"><h3>Ошибка</h3><p>${esc(e.message)}</p></div>`;
     }
@@ -1195,6 +1205,7 @@ const App = {
               <h2>
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
                 Обсуждение (${(t.messages || []).filter(m => !m.is_system).length})
+                <span class="reading-indicator" id="reading-indicator" style="display:none"></span>
               </h2>
               <div class="messages-list" id="messages-list">
                 ${(t.messages || []).map(m => this.renderMessage(m)).join('')}
@@ -1442,10 +1453,38 @@ const App = {
         this.renderTypingIndicator(data.typing);
       } catch {}
     }, 2000);
-    // Initial fetch
     this.api('GET', `/api/presence/typing/${ticket.id}`)
       .then(data => this.renderTypingIndicator(data.typing))
       .catch(() => {});
+
+    // Live message polling — auto-fetch new messages every 5s
+    const allMsgEls = document.querySelectorAll('.message[data-msg-id]');
+    let lastMsgId = 0;
+    allMsgEls.forEach(el => {
+      const id = parseInt(el.dataset.msgId);
+      if (id > lastMsgId) lastMsgId = id;
+    });
+    this._messagePollInterval = setInterval(async () => {
+      try {
+        const data = await this.api('GET', `/api/tickets/${ticket.id}/messages/poll?after=${lastMsgId}`);
+        if (data.messages && data.messages.length > 0) {
+          const list = document.getElementById('messages-list');
+          if (!list) return;
+          for (const msg of data.messages) {
+            // Skip if already rendered
+            if (document.querySelector(`.message[data-msg-id="${msg.id}"]`)) continue;
+            list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
+            if (msg.id > lastMsgId) lastMsgId = msg.id;
+          }
+          this.bindMessageActions(ticket);
+          // Auto-scroll if user is near bottom
+          const main = document.querySelector('.main');
+          if (main && (main.scrollHeight - main.scrollTop - main.clientHeight < 300)) {
+            list.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+          }
+        }
+      } catch {}
+    }, 5000);
 
     if (attachBtn && fileInput && messageInput && sendBtn) {
       // Send typing event on keystroke (throttled)
@@ -1708,6 +1747,54 @@ const App = {
     `;
   },
 
+  renderReadingIndicator(ticketId) {
+    const el = document.getElementById('reading-indicator');
+    if (!el) return;
+
+    const tid = ticketId || this._currentTicketId;
+    if (!tid) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+
+    const users = this._onlineUsers || [];
+    const readersAll = users.filter(u => u.currentView === 'ticket' && String(u.currentTicketId) === String(tid));
+    const readers = readersAll.filter(u => !this.user || u.id !== this.user.id);
+
+    if (readers.length === 0) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+
+    const max = 5;
+    const slice = readers.slice(0, max);
+    const more = readers.length - slice.length;
+
+    const avatars = slice.map(u => {
+      let title = esc(u.first_name || '');
+      if (u.username) {
+        title = title ? `${title} (@${esc(u.username)})` : `@${esc(u.username)}`;
+      }
+      if (!title) title = 'Unknown';
+
+      if (u.photo_url) {
+        return `<img src="${u.photo_url}" class="reading-avatar" alt="" title="${title}">`;
+      }
+      const letter = (u.first_name || u.username || '?')[0].toUpperCase();
+      return `<div class="reading-avatar-placeholder" title="${title}">${esc(letter)}</div>`;
+    }).join('');
+
+    const moreHtml = more > 0 ? `<div class="reading-more" title="Еще ${more}">+${more}</div>` : '';
+
+    el.style.display = 'flex';
+    el.innerHTML = `
+      <span class="reading-label">Читают</span>
+      <span class="reading-avatars">${avatars}${moreHtml}</span>
+    `;
+  },
+
   // ========== Online View ==========
   renderOnlineView(container) {
     const users = this._onlineUsers || [];
@@ -1896,6 +1983,188 @@ const App = {
         </div>
       `;
     }).join('');
+  },
+
+  // ========== Settings View ==========
+  async renderSettingsView(container) {
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    try {
+      const s = await this.api('GET', '/api/settings');
+
+      const currentAvatar = s.display_avatar === 'hidden' ? null : (s.display_avatar || s.real_photo_url);
+      const avatarPreview = currentAvatar
+        ? `<img src="${currentAvatar}" class="settings-avatar-preview" alt="">`
+        : `<div class="settings-avatar-placeholder">${(s.display_name || s.real_first_name || '?')[0].toUpperCase()}</div>`;
+
+      container.innerHTML = `
+        <div class="settings-view">
+          <div class="online-header">
+            <h2>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9"/></svg>
+              Настройки
+            </h2>
+          </div>
+
+          <!-- Profile section -->
+          <div class="settings-section">
+            <h3>Профиль</h3>
+            <p class="settings-hint">Ваши данные из Telegram: <strong>${esc(s.real_first_name)}</strong>${s.real_username ? ` (@${esc(s.real_username)})` : ''}</p>
+
+            <div class="settings-profile-row">
+              <div class="settings-avatar-wrap" id="settings-avatar-wrap">
+                ${avatarPreview}
+                <div class="settings-avatar-actions">
+                  <button class="btn btn-sm" id="settings-upload-avatar">Загрузить</button>
+                  <button class="btn btn-sm btn-danger" id="settings-hide-avatar" ${s.display_avatar === 'hidden' ? 'style="opacity:.5"' : ''}>Скрыть</button>
+                  ${s.display_avatar ? '<button class="btn btn-sm" id="settings-reset-avatar">Сбросить</button>' : ''}
+                </div>
+                <input type="file" id="settings-avatar-file" accept="image/*" hidden>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top:14px">
+              <label>Отображаемое имя</label>
+              <input class="form-input" id="settings-display-name" value="${esc(s.display_name)}" placeholder="${esc(s.real_first_name)} (по умолчанию)">
+              <span class="settings-hint">Другие пользователи будут видеть это имя вместо вашего имени из Telegram</span>
+            </div>
+          </div>
+
+          <!-- Privacy section -->
+          <div class="settings-section">
+            <h3>Приватность</h3>
+
+            <label class="settings-toggle">
+              <input type="checkbox" id="settings-hide-all" ${s.privacy_hidden ? 'checked' : ''}>
+              <span class="settings-toggle-slider"></span>
+              <div>
+                <span class="settings-toggle-label">Полностью скрыт</span>
+                <span class="settings-hint">Вас не будет видно в списке пользователей, как будто вы не зарегистрированы</span>
+              </div>
+            </label>
+
+            <label class="settings-toggle">
+              <input type="checkbox" id="settings-hide-online" ${s.privacy_hide_online ? 'checked' : ''}>
+              <span class="settings-toggle-slider"></span>
+              <div>
+                <span class="settings-toggle-label">Скрыть статус онлайн</span>
+                <span class="settings-hint">Вы не будете отображаться в списке онлайн, но будете видны в списке пользователей</span>
+              </div>
+            </label>
+
+            <label class="settings-toggle">
+              <input type="checkbox" id="settings-hide-activity" ${s.privacy_hide_activity ? 'checked' : ''}>
+              <span class="settings-toggle-slider"></span>
+              <div>
+                <span class="settings-toggle-label">Скрыть активность</span>
+                <span class="settings-hint">Другие не увидят, какую страницу или тикет вы сейчас просматриваете</span>
+              </div>
+            </label>
+
+            ${this.user.is_admin ? '<p class="settings-hint" style="margin-top:10px;color:var(--warning)">Администраторы всегда видят всех пользователей и их настоящие данные</p>' : ''}
+          </div>
+
+          <!-- Notifications -->
+          <div class="settings-section">
+            <h3>Уведомления</h3>
+
+            <label class="settings-toggle">
+              <input type="checkbox" id="settings-notify-own" ${s.notify_own ? 'checked' : ''}>
+              <span class="settings-toggle-slider"></span>
+              <div>
+                <span class="settings-toggle-label">Свои тикеты</span>
+                <span class="settings-hint">Получать уведомления по своим тикетам</span>
+              </div>
+            </label>
+
+            <label class="settings-toggle">
+              <input type="checkbox" id="settings-notify-sub" ${s.notify_subscribed ? 'checked' : ''}>
+              <span class="settings-toggle-slider"></span>
+              <div>
+                <span class="settings-toggle-label">Подписки</span>
+                <span class="settings-hint">Получать уведомления по тикетам, на которые вы подписаны</span>
+              </div>
+            </label>
+          </div>
+
+          <div style="margin-top:18px">
+            <button class="btn btn-primary btn-lg" id="settings-save">Сохранить настройки</button>
+          </div>
+        </div>
+      `;
+
+      this.bindSettings(s);
+    } catch (e) {
+      container.innerHTML = `<div class="empty-state"><h3>Ошибка</h3><p>${esc(e.message)}</p></div>`;
+    }
+  },
+
+  bindSettings(currentSettings) {
+    // Upload avatar
+    document.getElementById('settings-upload-avatar')?.addEventListener('click', () => {
+      document.getElementById('settings-avatar-file')?.click();
+    });
+
+    document.getElementById('settings-avatar-file')?.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('avatar', file);
+      try {
+        const res = await this.api('POST', '/api/settings/avatar', formData, true);
+        this.toast('Аватар обновлён', 'success');
+        this.navigate('settings');
+      } catch (err) { this.toast(err.message, 'error'); }
+    });
+
+    // Hide avatar
+    document.getElementById('settings-hide-avatar')?.addEventListener('click', async () => {
+      try {
+        await this.api('PUT', '/api/settings', { display_avatar: 'hidden' });
+        this.toast('Аватар скрыт', 'success');
+        this.navigate('settings');
+      } catch (err) { this.toast(err.message, 'error'); }
+    });
+
+    // Reset avatar
+    document.getElementById('settings-reset-avatar')?.addEventListener('click', async () => {
+      try {
+        await this.api('PUT', '/api/settings', { display_avatar: '' });
+        this.toast('Аватар сброшен', 'success');
+        this.navigate('settings');
+      } catch (err) { this.toast(err.message, 'error'); }
+    });
+
+    // Save all settings
+    document.getElementById('settings-save')?.addEventListener('click', async () => {
+      const btn = document.getElementById('settings-save');
+      btn.disabled = true;
+      btn.textContent = 'Сохранение...';
+
+      try {
+        await this.api('PUT', '/api/settings', {
+          display_name: document.getElementById('settings-display-name')?.value || '',
+          privacy_hidden: document.getElementById('settings-hide-all')?.checked || false,
+          privacy_hide_online: document.getElementById('settings-hide-online')?.checked || false,
+          privacy_hide_activity: document.getElementById('settings-hide-activity')?.checked || false,
+          notify_own: document.getElementById('settings-notify-own')?.checked || false,
+          notify_subscribed: document.getElementById('settings-notify-sub')?.checked || false,
+        });
+
+        // Refresh user data
+        try {
+          const res = await this.api('GET', '/api/auth/me');
+          this.user = res.user;
+        } catch {}
+
+        this.toast('Настройки сохранены', 'success');
+      } catch (err) {
+        this.toast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Сохранить настройки';
+      }
+    });
   },
 
   // ========== Create Modal ==========
