@@ -1752,12 +1752,32 @@ const App = {
       text = `${names[0]} и ещё ${names.length - 1} печатают`;
     }
 
+    const isAdmin = !!this.user?.is_admin;
+    const adminParts = isAdmin
+      ? typers
+        .filter(u => u._real_first_name)
+        .map(u => {
+          const real = `${esc(u._real_first_name)}${u._real_username ? ` <span class=\"online-user-username\">@${esc(u._real_username)}</span>` : ''}`;
+          const shown = `${esc(u.first_name || '')}${u.username ? ` <span class=\"online-user-username\">@${esc(u.username)}</span>` : ''}`;
+          if (u._real_first_name === u.first_name && (u._real_username || null) === (u.username || null)) return null;
+          return `${shown} → ${real}`;
+        })
+        .filter(Boolean)
+      : [];
+
+    const adminLine = adminParts.length > 0
+      ? `<div class="typing-admin admin-real-line">реально: ${adminParts.join(', ')}</div>`
+      : '';
+
     el.style.display = 'flex';
     el.innerHTML = `
       <div class="typing-avatars">${avatars}</div>
       <div class="typing-text">
-        <span>${text}</span>
-        <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+        <div class="typing-main">
+          <span>${text}</span>
+          <span class="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+        </div>
+        ${adminLine}
       </div>
     `;
   },

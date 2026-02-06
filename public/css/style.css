@@ -1544,10 +1544,17 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
 
 .typing-text {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.typing-main {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
 }
 
 .typing-dots {
