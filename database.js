@@ -578,7 +578,8 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
     SELECT t.*,
     u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
     u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden,
-    (SELECT COUNT(*) FROM messages m WHERE m.ticket_id = t.id AND m.is_system = 0) as message_count
+    (SELECT COUNT(*) FROM messages m WHERE m.ticket_id = t.id AND m.is_system = 0) as message_count,
+    (CASE WHEN EXISTS (SELECT 1 FROM pinned_tickets p WHERE p.ticket_id = t.id) THEN 1 ELSE 0 END) as is_pinned
     FROM tickets t
     JOIN users u ON t.author_id = u.id
     ${whereClause}
@@ -598,7 +599,7 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
 
 function updateTicket(id, updates) {
   const db = getDb();
-  const allowed = ['title', 'description', 'type', 'status', 'priority', 'is_private', 'assigned_to', 'emoji', 'color', 'resource_name', 'resource_protocol', 'resource_ports'];
+  const allowed = ['title', 'description', 'type', 'status', 'priority', 'is_private', 'assigned_to', 'emoji', 'color', 'resource_name', 'resource_protocol', 'resource_ports', 'is_megathread'];
   const sets = [];
   const params = [];
 

@@ -569,16 +569,31 @@ const App = {
       if (saved.sort) params.set('sort', saved.sort);
       if (saved.search) params.set('search', saved.search);
 
-      const [stats, ticketData] = await Promise.all([
+      const [stats, ticketData, pinnedData] = await Promise.all([
         this.api('GET', '/api/stats'),
         this.api('GET', `/api/tickets?${params}`),
+        this.api('GET', '/api/pinned'),
       ]);
+
+      const pinnedIds = new Set((pinnedData.tickets || []).map(t => t.id));
+      const filteredTickets = ticketData.tickets.filter(t => !pinnedIds.has(t.id));
 
       container.innerHTML = `
         ${this.renderStats(stats)}
         ${this.renderToolbar(saved)}
+        ${pinnedData.tickets && pinnedData.tickets.length > 0 ? `
+          <div class="pinned-section">
+            <div class="pinned-section-header">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5v6l1 1 1-1v-6h5v-2l-2-2z"/></svg>
+              <span>Закреплённые</span>
+            </div>
+            <div class="ticket-list pinned-list">
+              ${this.renderTicketList(pinnedData.tickets, true)}
+            </div>
+          </div>
+        ` : ''}
         <div id="ticket-list" class="ticket-list">
-          ${saved.group_by ? this.renderGroupedTicketList(ticketData.tickets, saved.group_by) : this.renderTicketList(ticketData.tickets)}
+          ${saved.group_by ? this.renderGroupedTicketList(filteredTickets, saved.group_by) : this.renderTicketList(filteredTickets)}
         </div>
         ${ticketData.total > ticketData.limit ? this.renderPagination(ticketData) : ''}
       `;
@@ -794,7 +809,7 @@ const App = {
     return html;
   },
 
-  renderTicketList(tickets) {
+  renderTicketList(tickets, isPinnedSection = false) {
     if (!tickets.length) {
       return `
         <div class="empty-state">
@@ -818,13 +833,23 @@ const App = {
         ? `<span class="type-badge" style="color:${typeInfo.color};border-color:${typeInfo.color}40;background:${typeInfo.color}15">${typeInfo.emoji ? typeInfo.emoji + ' ' : ''}${esc(typeInfo.name)}</span>`
         : `<span class="type-badge">${esc(t.type)}</span>`;
 
+      const pinnedBadge = (t.is_pinned && !isPinnedSection)
+        ? '<span class="pinned-badge" title="Закреплено"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5v6l1 1 1-1v-6h5v-2l-2-2z"/></svg></span>'
+        : '';
+
+      const megathreadBadge = t.is_megathread
+        ? '<span class="megathread-badge" title="Мегатред">MEGA</span>'
+        : '';
+
       return `
-        <div class="ticket-row" data-id="${t.id}" style="${colorStyle}">
+        <div class="ticket-row ${isPinnedSection ? 'pinned-row' : ''} ${t.is_megathread ? 'megathread-row' : ''}" data-id="${t.id}" style="${colorStyle}">
           ${icon}
           <div class="ticket-info">
             <div class="ticket-title-row">
+              ${pinnedBadge}
               <span class="ticket-id">#${t.id}</span>
               <span class="ticket-title">${esc(t.title)}</span>
+              ${megathreadBadge}
               ${typeBadgeHtml}
               <span class="ticket-tags">${tagsHtml}</span>
             </div>
@@ -836,7 +861,7 @@ const App = {
           <span class="ticket-status status-${t.status}">${statusLabel(t.status)}</span>
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
           <button class="vote-btn ${t.user_voted ? 'voted' : ''}" data-vote="${t.id}" onclick="event.stopPropagation()" title="Голосовать за тикет">
-            <span class="whale-emoji">🐳</span>
+            <span class="whale-emoji">\uD83D\uDC33</span>
             ${t.votes_count}
           </button>
           <span class="message-count">
@@ -1355,7 +1380,9 @@ const App = {
         <div class="ticket-header">
           <h1>
             ${ticketIcon(t, false, this.ticketTypes)}
+            ${t.is_pinned ? '<span class="pinned-badge" title="Закреплено" style="margin-right:4px"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5v6l1 1 1-1v-6h5v-2l-2-2z"/></svg></span>' : ''}
             <span id="ticket-title-text">${esc(t.title)}</span>
+            ${t.is_megathread ? '<span class="megathread-badge" style="margin-left:6px">MEGA</span>' : ''}
             ${canEdit ? '<button class="btn-icon" id="edit-title-btn" title="Редактировать" style="font-size:14px;margin-left:4px;opacity:.5">&#9998;</button>' : ''}
           </h1>
           <div class="ticket-header-meta">
@@ -1392,11 +1419,13 @@ const App = {
             <div class="messages-section">
               <h2>
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
-                Обсуждение (<span id="discussion-count">${(t.messages || []).filter(m => !m.is_system).length}</span>)
+                ${t.is_megathread ? '<span class="megathread-badge" style="margin-right:6px">MEGA</span>' : ''}
+                ${t.is_megathread ? 'Мегатред' : 'Обсуждение'} (<span id="discussion-count">${(t.messages || []).filter(m => !m.is_system).length}</span>)
                 <span class="reading-indicator" id="reading-indicator" style="display:none"></span>
               </h2>
+              ${t.is_megathread ? '<p style="font-size:12px;color:var(--text-muted);margin:-8px 0 12px">Нажмите "Ответить" на сообщении чтобы начать подтред</p>' : ''}
               <div class="messages-list" id="messages-list">
-                ${(t.messages || []).map(m => this.renderMessage(m)).join('')}
+                ${(t.messages || []).map(m => this.renderMessage(m, !!t.is_megathread)).join('')}
               </div>
 
               <div class="typing-indicator" id="typing-indicator" style="display:none"></div>
@@ -1454,6 +1483,18 @@ const App = {
                     <input type="checkbox" id="change-private" ${t.is_private ? 'checked' : ''}>
                     Приватный
                   </label>
+                </div>
+                <div class="sidebar-field" style="margin-top:8px">
+                  <label class="form-checkbox">
+                    <input type="checkbox" id="change-megathread" ${t.is_megathread ? 'checked' : ''}>
+                    Мегатред (подтреды)
+                  </label>
+                </div>
+                <div class="sidebar-field" style="margin-top:8px">
+                  <button class="btn btn-sm ${t.is_pinned ? 'btn-primary' : ''}" id="toggle-pin-btn" style="width:100%">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle;margin-right:4px"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5v6l1 1 1-1v-6h5v-2l-2-2z"/></svg>
+                    ${t.is_pinned ? 'Открепить' : 'Закрепить'}
+                  </button>
                 </div>
               </div>
             ` : ''}
@@ -1553,6 +1594,29 @@ const App = {
         try {
           await this.api('PUT', `/api/tickets/${ticket.id}`, { is_private: e.target.checked ? 1 : 0 });
           this.toast('Видимость обновлена', 'success');
+        } catch (e) { this.toast(e.message, 'error'); }
+      });
+
+      // Megathread toggle
+      document.getElementById('change-megathread')?.addEventListener('change', async (e) => {
+        try {
+          await this.api('POST', `/api/tickets/${ticket.id}/megathread`, { enable: e.target.checked });
+          this.toast(e.target.checked ? 'Мегатред включён' : 'Мегатред выключен', 'success');
+          this.navigate('ticket', { id: ticket.id });
+        } catch (e) { this.toast(e.message, 'error'); }
+      });
+
+      // Pin/Unpin toggle
+      document.getElementById('toggle-pin-btn')?.addEventListener('click', async () => {
+        try {
+          if (ticket.is_pinned) {
+            await this.api('POST', `/api/tickets/${ticket.id}/unpin`);
+            this.toast('Тикет откреплён', 'info');
+          } else {
+            await this.api('POST', `/api/tickets/${ticket.id}/pin`);
+            this.toast('Тикет закреплён', 'success');
+          }
+          this.navigate('ticket', { id: ticket.id });
         } catch (e) { this.toast(e.message, 'error'); }
       });
     }
@@ -1662,7 +1726,7 @@ const App = {
           for (const msg of data.messages) {
             // Skip if already rendered
             if (document.querySelector(`.message[data-msg-id="${msg.id}"]`)) continue;
-            list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
+            list.insertAdjacentHTML('beforeend', this.renderMessage(msg, !!ticket.is_megathread));
             if (!msg.is_system) addedNonSystem++;
             if (msg.id > lastMsgId) lastMsgId = msg.id;
           }
@@ -1760,7 +1824,7 @@ const App = {
           this.renderFilePreview(selectedFiles);
 
           const list = document.getElementById('messages-list');
-          list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
+          list.insertAdjacentHTML('beforeend', this.renderMessage(msg, !!ticket.is_megathread));
           list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
           this.bindMessageActions(ticket);
           this.toast('Сообщение отправлено', 'success');
@@ -1867,9 +1931,121 @@ const App = {
         }
       });
     });
+
+    // Thread reply buttons (megathread)
+    document.querySelectorAll('.msg-reply-btn').forEach(btn => {
+      if (btn._bound) return;
+      btn._bound = true;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgId = btn.dataset.msgId;
+        this.toggleThreadReplies(msgId, ticket);
+      });
+    });
+
+    // Thread reply indicator click — expand thread
+    document.querySelectorAll('.thread-reply-indicator').forEach(el => {
+      if (el._bound) return;
+      el._bound = true;
+      el.addEventListener('click', () => {
+        const msgId = el.dataset.msgId;
+        this.toggleThreadReplies(msgId, ticket);
+      });
+    });
   },
 
-  renderMessage(m) {
+  async loadThreadReplies(msgId, ticket) {
+    return this.toggleThreadReplies(msgId, ticket, true);
+  },
+
+  async toggleThreadReplies(msgId, ticket, forceOpen = false) {
+    const container = document.getElementById(`thread-replies-${msgId}`);
+    if (!container) return;
+
+    // Toggle visibility (unless forceOpen)
+    if (!forceOpen && container.style.display !== 'none' && container.innerHTML) {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.style.display = 'block';
+    container.innerHTML = '<div class="loading" style="padding:8px"><div class="spinner" style="width:20px;height:20px"></div></div>';
+
+    try {
+      const data = await this.api('GET', `/api/messages/${msgId}/replies`);
+      const replies = data.replies || [];
+
+      const repliesHtml = replies.map(r => {
+        const avatarHtml = r.author_photo
+          ? `<img src="${r.author_photo}" class="user-avatar" alt="" style="width:24px;height:24px">`
+          : `<div class="user-avatar-placeholder" style="width:24px;height:24px;font-size:11px">${(r.author_first_name || '?')[0].toUpperCase()}</div>`;
+        const canDelete = this.user && (this.user.is_admin || r.author_id === this.user.id);
+
+        return `
+          <div class="thread-reply" data-reply-id="${r.id}">
+            <div class="thread-reply-avatar">${avatarHtml}</div>
+            <div class="thread-reply-body">
+              <span class="thread-reply-author">${esc(r.author_first_name || r.author_username || 'Unknown')}</span>
+              ${r.author_is_admin ? '<span class="admin-badge" style="font-size:9px">Админ</span>' : ''}
+              <span class="thread-reply-date">${timeAgo(r.created_at)}</span>
+              ${canDelete ? `<button class="thread-reply-delete" data-reply-id="${r.id}" title="Удалить">&times;</button>` : ''}
+              <div class="thread-reply-content">${esc(r.content)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <div class="thread-replies-list">${repliesHtml}</div>
+        <div class="thread-reply-form">
+          <textarea class="thread-reply-input" placeholder="Ответить в подтреде..." rows="2"></textarea>
+          <button class="btn btn-primary btn-sm thread-reply-send" data-msg-id="${msgId}">Ответить</button>
+        </div>
+      `;
+
+      // Bind send reply
+      const sendBtn = container.querySelector('.thread-reply-send');
+      const replyInput = container.querySelector('.thread-reply-input');
+
+      sendBtn?.addEventListener('click', async () => {
+        const content = replyInput.value.trim();
+        if (!content) return;
+        sendBtn.disabled = true;
+        try {
+          await this.api('POST', `/api/messages/${msgId}/replies`, { content });
+          replyInput.value = '';
+          // Force reload by clearing and re-loading
+          container.innerHTML = '';
+          container.style.display = 'none';
+          await this.loadThreadReplies(msgId, ticket);
+        } catch (e) {
+          this.toast(e.message, 'error');
+        }
+        sendBtn.disabled = false;
+      });
+
+      replyInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.ctrlKey) sendBtn.click();
+      });
+
+      // Bind delete reply
+      container.querySelectorAll('.thread-reply-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Удалить этот ответ?')) return;
+          try {
+            await this.api('DELETE', `/api/thread-replies/${btn.dataset.replyId}`);
+            container.innerHTML = '';
+            container.style.display = 'none';
+            await this.loadThreadReplies(msgId, ticket);
+          } catch (e) { this.toast(e.message, 'error'); }
+        });
+      });
+    } catch (e) {
+      container.innerHTML = `<div style="color:var(--danger);padding:8px">Ошибка: ${esc(e.message)}</div>`;
+    }
+  },
+
+  renderMessage(m, isMegathread = false) {
     if (m.is_system) {
       return `<div class="message system" data-msg-id="${m.id}"><span>${esc(m.content)}</span><span class="message-date" style="margin-left:auto">${timeAgo(m.created_at)}</span></div>`;
     }
@@ -1886,8 +2062,16 @@ const App = {
     }).join('');
 
     const canManage = this.user && (this.user.is_admin || m.author_id === this.user.id);
+
+    const replyBtnHtml = isMegathread ? `
+        <button class="msg-action-btn msg-reply-btn" data-msg-id="${m.id}" title="Ответить в подтреде">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+        </button>
+    ` : '';
+
     const actionsHtml = `
       <div class="message-actions">
+        ${replyBtnHtml}
         <button class="msg-action-btn msg-reaction-btn" data-msg-id="${m.id}" title="Реакция">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
         </button>
@@ -1904,8 +2088,16 @@ const App = {
 
     const reactionsHtml = this.renderReactions(m.reactions || [], m.id);
 
+    // Thread replies indicator for megathreads
+    const replyCountHtml = isMegathread && m.reply_count > 0 ? `
+      <div class="thread-reply-indicator" data-msg-id="${m.id}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+        <span>${m.reply_count} ${m.reply_count === 1 ? 'ответ' : m.reply_count < 5 ? 'ответа' : 'ответов'}</span>
+      </div>
+    ` : '';
+
     return `
-      <div class="message" data-msg-id="${m.id}">
+      <div class="message ${isMegathread ? 'megathread-message' : ''}" data-msg-id="${m.id}">
         <div class="message-avatar">${avatarHtml}</div>
         <div class="message-body">
           <div class="message-header">
@@ -1917,6 +2109,8 @@ const App = {
           <div class="message-content" id="msg-content-${m.id}">${esc(m.content)}</div>
           ${attachmentsHtml ? `<div class="message-attachments">${attachmentsHtml}</div>` : ''}
           <div class="message-reactions" id="msg-reactions-${m.id}">${reactionsHtml}</div>
+          ${replyCountHtml}
+          <div class="thread-replies-container" id="thread-replies-${m.id}" style="display:none"></div>
         </div>
       </div>
     `;
@@ -2886,6 +3080,14 @@ const App = {
               Приватный (видит только админ и вы)
             </label>
           </div>
+          ${this.user.is_admin ? `
+          <div class="form-group">
+            <label class="form-checkbox">
+              <input type="checkbox" id="create-megathread">
+              Мегатред (с подтредами, как GitHub Discussions)
+            </label>
+          </div>
+          ` : ''}
           <div class="form-group">
             <label>Файлы</label>
             <input type="file" id="create-files" multiple>
@@ -2941,6 +3143,7 @@ const App = {
       const type = document.getElementById('create-type').value;
       const priority = document.getElementById('create-priority').value;
       const is_private = document.getElementById('create-private').checked;
+      const is_megathread = document.getElementById('create-megathread')?.checked || false;
       const emoji = document.getElementById('create-emoji').value || null;
       const colorEnabled = document.getElementById('create-color-enabled').checked;
       const color = colorEnabled ? document.getElementById('create-color').value : null;
@@ -2956,7 +3159,7 @@ const App = {
 
       try {
         const ticket = await this.api('POST', '/api/tickets', {
-          title, description, type, priority, is_private, emoji, color,
+          title, description, type, priority, is_private, emoji, color, is_megathread,
           tags: Array.from(selectedTags),
         });
 

@@ -2352,3 +2352,226 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
 .lightbox-close:hover {
   opacity: 1;
 }
+
+/* ========== Pinned Tickets ========== */
+.pinned-section {
+  margin-bottom: 20px;
+}
+
+.pinned-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pinned-section-header svg {
+  color: var(--warning);
+  flex-shrink: 0;
+}
+
+.pinned-list .ticket-row {
+  background: linear-gradient(135deg, rgba(234, 179, 8, .04), rgba(234, 179, 8, .01));
+  border: 1px solid rgba(234, 179, 8, .15);
+}
+
+.pinned-list .ticket-row:hover {
+  border-color: rgba(234, 179, 8, .3);
+  background: linear-gradient(135deg, rgba(234, 179, 8, .08), rgba(234, 179, 8, .03));
+}
+
+.pinned-badge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--warning);
+  flex-shrink: 0;
+}
+
+.pinned-badge svg {
+  vertical-align: middle;
+}
+
+/* ========== Megathread Badge ========== */
+.megathread-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, .12);
+  border: 1px solid rgba(139, 92, 246, .25);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.megathread-row {
+  border-left: 2px solid rgba(139, 92, 246, .4) !important;
+}
+
+/* ========== Thread Replies (Sub-threads) ========== */
+.thread-reply-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  background: rgba(0, 116, 232, .08);
+  border: 1px solid rgba(0, 116, 232, .15);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.thread-reply-indicator:hover {
+  background: rgba(0, 116, 232, .15);
+  border-color: rgba(0, 116, 232, .3);
+}
+
+.thread-reply-indicator svg {
+  flex-shrink: 0;
+}
+
+.thread-replies-container {
+  margin-top: 10px;
+  padding: 12px;
+  border-left: 2px solid rgba(139, 92, 246, .25);
+  background: rgba(139, 92, 246, .03);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.thread-replies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.thread-reply {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: var(--transition);
+}
+
+.thread-reply:hover {
+  border-color: var(--border-glow);
+}
+
+.thread-reply-avatar {
+  flex-shrink: 0;
+}
+
+.thread-reply-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-reply-author {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  margin-right: 6px;
+}
+
+.thread-reply-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.thread-reply-delete {
+  float: right;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: var(--transition);
+}
+
+.thread-reply:hover .thread-reply-delete {
+  opacity: 1;
+}
+
+.thread-reply-delete:hover {
+  color: var(--danger);
+}
+
+.thread-reply-content {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  word-wrap: break-word;
+}
+
+.thread-reply-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.thread-reply-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 10px;
+  resize: vertical;
+  min-height: 36px;
+  max-height: 120px;
+  font-family: inherit;
+  transition: var(--transition);
+}
+
+.thread-reply-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.thread-reply-send {
+  flex-shrink: 0;
+}
+
+/* Megathread message styling */
+.megathread-message {
+  position: relative;
+}
+
+.megathread-message .message-body {
+  border-left: 2px solid transparent;
+  padding-left: 2px;
+  transition: border-color var(--transition);
+}
+
+.megathread-message:hover .message-body {
+  border-left-color: rgba(139, 92, 246, .2);
+}
+
+/* Reply button highlight */
+.msg-reply-btn {
+  color: var(--accent) !important;
+}
+
+.msg-reply-btn:hover {
+  background: rgba(0, 116, 232, .15) !important;
+}

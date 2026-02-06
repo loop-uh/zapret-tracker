@@ -924,6 +924,7 @@ app.get('/api/tickets/:id', authMiddleware, (req, res) => {
   const userVotes = db.getUserVotes(req.user.id);
   ticket.user_voted = userVotes.includes(ticket.id);
   ticket.user_subscribed = db.isSubscribed(req.user.id, ticket.id);
+  ticket.is_pinned = db.isPinned(ticket.id);
   ticket.messages = db.getMessages(ticket.id);
 
   // Attach reactions to messages
@@ -931,6 +932,14 @@ app.get('/api/tickets/:id', authMiddleware, (req, res) => {
   const allReactions = db.getReactionsForMessages(msgIds);
   for (const m of ticket.messages) {
     m.reactions = aggregateReactions(allReactions[m.id] || [], req.user);
+  }
+
+  // For megathreads, attach thread reply counts per message
+  if (ticket.is_megathread) {
+    const replyCounts = db.getThreadReplyCountsForTicket(ticket.id);
+    for (const m of ticket.messages) {
+      m.reply_count = replyCounts[m.id] || 0;
+    }
   }
 
   applyMaskToTicketAuthor(ticket, req.user);
@@ -955,11 +964,15 @@ app.post('/api/tickets', authMiddleware, (req, res) => {
     resource_protocol,
     resource_ports,
     resource_name,
+    is_megathread,
   } = req.body;
 
   if (!title || !type) {
     return res.status(400).json({ error: 'Title and type are required' });
   }
+
+  // Only admins can create megathreads
+  const megathread = is_megathread && req.user.is_admin ? true : false;
 
   const ticket = db.createTicket({
     title, description, type,
@@ -973,6 +986,7 @@ app.post('/api/tickets', authMiddleware, (req, res) => {
     resource_protocol: resource_protocol || null,
     resource_ports: resource_ports || null,
     resource_name: resource_name || null,
+    is_megathread: megathread,
   });
 
   // Notify admin about new ticket (if author is not admin)
@@ -1550,6 +1564,134 @@ app.delete('/api/ticket-types/:id', authMiddleware, adminMiddleware, (req, res) 
   res.json({ ok: true });
 });
 
+// --- Pinned Tickets ---
+
+app.get('/api/pinned', authMiddleware, (req, res) => {
+  const pinned = db.getPinnedTickets({
+    is_admin: req.user.is_admin,
+    user_id: req.user.id,
+  });
+  const userVotes = db.getUserVotes(req.user.id);
+  const userSubs = db.getUserSubscriptions(req.user.id);
+  for (const t of pinned) {
+    t.user_voted = userVotes.includes(t.id);
+    t.user_subscribed = userSubs.includes(t.id);
+    applyMaskToTicketAuthor(t, req.user);
+  }
+  res.json({ tickets: pinned });
+});
+
+app.post('/api/tickets/:id/pin', authMiddleware, adminMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  db.pinTicket(ticketId, req.user.id);
+  res.json({ pinned: true });
+});
+
+app.post('/api/tickets/:id/unpin', authMiddleware, adminMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  db.unpinTicket(ticketId);
+  res.json({ pinned: false });
+});
+
+app.put('/api/pinned/reorder', authMiddleware, adminMiddleware, (req, res) => {
+  const { ticketIds } = req.body;
+  if (!Array.isArray(ticketIds)) return res.status(400).json({ error: 'ticketIds array required' });
+  db.reorderPinnedTickets(ticketIds);
+  res.json({ ok: true });
+});
+
+// --- Megathreads / Thread Replies ---
+
+app.post('/api/tickets/:id/megathread', authMiddleware, adminMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  const { enable } = req.body;
+  db.updateTicket(ticketId, { is_megathread: enable ? 1 : 0 });
+  res.json({ is_megathread: !!enable });
+});
+
+// Get thread replies for a specific message
+app.get('/api/messages/:id/replies', authMiddleware, (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const message = db.getMessageById(msgId);
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+
+  const ticket = db.getTicketById(message.ticket_id);
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const replies = db.getThreadReplies(msgId);
+  for (const r of replies) {
+    applyMaskToMessageAuthor(r, req.user);
+  }
+  res.json({ replies });
+});
+
+// Add reply to a message thread
+app.post('/api/messages/:id/replies', authMiddleware, (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const message = db.getMessageById(msgId);
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+
+  const ticket = db.getTicketById(message.ticket_id);
+  if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+  if (!ticket.is_megathread) return res.status(400).json({ error: 'Подтреды доступны только в мегатредах' });
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  if (['closed', 'rejected', 'duplicate'].includes(ticket.status) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Тикет закрыт' });
+  }
+
+  const { content } = req.body;
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: 'Content required' });
+  }
+
+  const reply = db.addThreadReply({
+    ticket_id: ticket.id,
+    parent_message_id: msgId,
+    author_id: req.user.id,
+    content: content.trim(),
+  });
+
+  // Auto-subscribe replier
+  db.subscribe(req.user.id, ticket.id);
+
+  // Notify subscribers
+  const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
+  notifySubscribers(ticket.id, req.user.id,
+    `💬 Ответ в подтреде #${ticket.id}\n` +
+    `<b>${escHtml(ticket.title)}</b>\n` +
+    `От: ${authorName}\n\n` +
+    `${escHtml(content.trim().substring(0, 300))}`
+  );
+
+  applyMaskToMessageAuthor(reply, req.user);
+  res.json(reply);
+});
+
+// Delete thread reply
+app.delete('/api/thread-replies/:id', authMiddleware, (req, res) => {
+  const replyId = parseInt(req.params.id);
+  const reply = db.getThreadReplyById(replyId);
+  if (!reply) return res.status(404).json({ error: 'Reply not found' });
+
+  if (!req.user.is_admin && reply.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  db.deleteThreadReply(replyId);
+  res.json({ ok: true });
+});
+
 // --- Stats ---
 
 app.get('/api/stats', authMiddleware, (req, res) => {
@@ -2019,6 +2161,12 @@ function applyMaskToTicketAuthor(ticket, viewer) {
       ticket.author_username = masked.username;
       ticket.author_photo = masked.photo_url;
     }
+  } else if (isSelf && !viewerIsAdmin) {
+    // Even for self, apply display_avatar/display_name so the user sees their masked appearance
+    const masked = maskUserForPublic(src, false);
+    ticket.author_first_name = masked.first_name;
+    ticket.author_username = masked.username;
+    ticket.author_photo = masked.photo_url;
   }
 
   if (!viewerIsAdmin) {
@@ -2032,6 +2180,10 @@ function applyMaskToTicketAuthor(ticket, viewer) {
     ticket.author_fake_name = src.display_name || null;
     ticket.author_fake_avatar = src.display_avatar || null;
     ticket.author_privacy_hidden = !!src.privacy_hidden;
+    // Also apply display mask for visual rendering (admin sees masked version + real data alongside)
+    const masked = maskUserForPublic(src, true);
+    ticket.author_first_name = masked.first_name;
+    ticket.author_photo = masked.photo_url;
   }
 }
 
@@ -2060,6 +2212,12 @@ function applyMaskToMessageAuthor(msg, viewer) {
       msg.author_username = masked.username;
       msg.author_photo = masked.photo_url;
     }
+  } else if (isSelf && !viewerIsAdmin) {
+    // Even for self, apply display_avatar/display_name so the user sees their masked appearance
+    const masked = maskUserForPublic(src, false);
+    msg.author_first_name = masked.first_name;
+    msg.author_username = masked.username;
+    msg.author_photo = masked.photo_url;
   }
 
   if (!viewerIsAdmin) {
@@ -2072,6 +2230,10 @@ function applyMaskToMessageAuthor(msg, viewer) {
     msg.author_fake_name = src.display_name || null;
     msg.author_fake_avatar = src.display_avatar || null;
     msg.author_privacy_hidden = !!src.privacy_hidden;
+    // Also apply display mask for visual rendering
+    const masked = maskUserForPublic(src, true);
+    msg.author_first_name = masked.first_name;
+    msg.author_photo = masked.photo_url;
   }
 }
 
