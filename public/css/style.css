@@ -1406,6 +1406,12 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   margin-top: 3px;
 }
 
+.admin-real-line {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 .online-ticket-link {
   color: var(--text-link);
   cursor: pointer;

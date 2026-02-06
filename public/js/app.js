@@ -1868,6 +1868,9 @@ const App = {
                         ${u.username ? `<span class="online-user-username">@${esc(u.username)}</span>` : ''}
                         ${u.is_admin ? '<span class="admin-badge">Админ</span>' : ''}
                       </div>
+                      ${this.user?.is_admin && u._real_first_name ? `
+                        <div class="admin-real-line">реально: ${esc(u._real_first_name)}${u._real_username ? ` <span class=\"online-user-username\">@${esc(u._real_username)}</span>` : ''}</div>
+                      ` : ''}
                       <div class="online-user-location">${viewText}</div>
                     </div>
                   </div>
@@ -1993,6 +1996,9 @@ const App = {
               ${u.username ? `<span class="online-user-username">@${esc(u.username)}</span>` : ''}
               ${u.is_admin ? '<span class="admin-badge">Админ</span>' : ''}
             </div>
+            ${this.user?.is_admin && u._real_first_name ? `
+              <div class="admin-real-line">реально: ${esc(u._real_first_name)}${u._real_username ? ` <span class=\"online-user-username\">@${esc(u._real_username)}</span>` : ''}</div>
+            ` : ''}
             <div class="user-list-meta">
               ${statusHtml}
               ${locationHtml}
