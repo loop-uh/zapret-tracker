@@ -246,6 +246,10 @@ const App = {
         const id = this._pendingTicketId;
         this._pendingTicketId = null;
         this.navigate('ticket', { id });
+      } else if (this._pendingPresetId) {
+        const id = this._pendingPresetId;
+        this._pendingPresetId = null;
+        this.navigate('preset', { id });
       } else {
         this.navigate(this.currentView);
       }
@@ -626,6 +630,8 @@ const App = {
       case 'about': this.renderAboutView(content); break;
       case 'admin': this.renderAdminView(content); break;
       case 'ticket': this.renderTicketView(content, data); break;
+      case 'presets': this.renderPresetsView(content); break;
+      case 'preset': this.renderPresetDetailView(content, data); break;
       default: this.renderListView(content);
     }
 
@@ -1454,6 +1460,9 @@ const App = {
 
     const attachmentsHtml = (t.attachments || []).map(a => {
       if (isImageAttachment(a)) {
+        if (isGifAttachment(a)) {
+          return `<img class="attachment-preview attachment-preview-gif lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" src="/uploads/${a.filename}" alt="${esc(a.original_name)}" draggable="false">`;
+        }
         return `<div class="attachment-preview lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" style="background-image:url('/uploads/${a.filename}')"></div>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)}</a>`;
@@ -2258,6 +2267,9 @@ const App = {
 
     const attachmentsHtml = (m.attachments || []).map(a => {
       if (isImageAttachment(a)) {
+        if (isGifAttachment(a)) {
+          return `<img class="attachment-preview attachment-preview-gif lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" src="/uploads/${a.filename}" alt="${esc(a.original_name)}" draggable="false">`;
+        }
         return `<div class="attachment-preview lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" style="background-image:url('/uploads/${a.filename}')"></div>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
@@ -3731,6 +3743,13 @@ function isImageAttachment(att) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 }
 
+function isGifAttachment(att) {
+  const mt = (att?.mime_type || '').toLowerCase();
+  if (mt === 'image/gif') return true;
+  const name = (att?.original_name || att?.filename || '').toLowerCase();
+  return /\.gif$/i.test(name);
+}
+
 // Broken background-image previews: detect load failures via hidden probe img
 (function() {
   const observer = new MutationObserver((mutations) => {
@@ -3742,15 +3761,20 @@ function isImageAttachment(att) {
         previews.forEach(el => {
           const src = el.dataset.src;
           if (!src) return;
-          const probe = new Image();
-          probe.onerror = () => {
+          const fallback = () => {
             const name = el.dataset.alt || 'attachment';
             const span = document.createElement('span');
             span.className = 'attachment';
             span.textContent = `\u{1F4CE} ${name}`;
             el.replaceWith(span);
           };
-          probe.src = src;
+          if (el.tagName === 'IMG') {
+            el.onerror = fallback;
+          } else {
+            const probe = new Image();
+            probe.onerror = fallback;
+            probe.src = src;
+          }
         });
       }
     }

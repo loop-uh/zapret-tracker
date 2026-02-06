@@ -856,6 +856,16 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   display: inline-block;
 }
 
+img.attachment-preview-gif {
+  width: auto;
+  max-width: 300px;
+  height: auto;
+  max-height: 200px;
+  object-fit: contain;
+  background: none;
+  vertical-align: top;
+}
+
 /* ========== Message Actions ========== */
 .message-actions {
   display: flex;
