@@ -3129,7 +3129,18 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
 .presets-view .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 20px; }
 
 /* Avatar sizes for presets */
+.avatar-sm { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
 .avatar-md { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.avatar-sm.avatar-placeholder,
+.avatar-md.avatar-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
 
 /* btn-danger */
 .btn-danger { background: var(--danger, #e8364d); color: #fff; }
