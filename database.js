@@ -118,6 +118,14 @@ function init() {
       FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
     CREATE INDEX IF NOT EXISTS idx_tickets_type ON tickets(type);
     CREATE INDEX IF NOT EXISTS idx_tickets_author ON tickets(author_id);
@@ -154,8 +162,20 @@ function init() {
   });
   insertMany(defaultTags);
 
+  // Migrations: add columns safely
+  const migrations = [
+    "ALTER TABLE tickets ADD COLUMN emoji TEXT DEFAULT NULL",
+    "ALTER TABLE tickets ADD COLUMN color TEXT DEFAULT NULL",
+  ];
+  for (const sql of migrations) {
+    try { db.exec(sql); } catch {}
+  }
+
   // Cleanup old auth tokens (older than 10 minutes)
   db.prepare("DELETE FROM auth_tokens WHERE created_at < datetime('now', '-10 minutes')").run();
+
+  // Cleanup old sessions (older than 90 days)
+  db.prepare("DELETE FROM sessions WHERE created_at < datetime('now', '-90 days')").run();
 
   return db;
 }
@@ -198,6 +218,24 @@ function deleteAuthToken(token) {
 
 function cleanupAuthTokens() {
   getDb().prepare("DELETE FROM auth_tokens WHERE created_at < datetime('now', '-10 minutes')").run();
+}
+
+// ========== Sessions (persistent) ==========
+
+function createSession(token, userId) {
+  getDb().prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').run(token, userId);
+}
+
+function getSession(token) {
+  return getDb().prepare('SELECT * FROM sessions WHERE token = ?').get(token);
+}
+
+function deleteSession(token) {
+  getDb().prepare('DELETE FROM sessions WHERE token = ?').run(token);
+}
+
+function cleanupSessions() {
+  getDb().prepare("DELETE FROM sessions WHERE created_at < datetime('now', '-90 days')").run();
 }
 
 // ========== Users ==========
@@ -245,12 +283,12 @@ function updateUserChatId(telegramId, chatId) {
 
 // ========== Tickets ==========
 
-function createTicket({ title, description, type, priority, is_private, author_id, tags }) {
+function createTicket({ title, description, type, priority, is_private, author_id, tags, emoji, color }) {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO tickets (title, description, type, priority, is_private, author_id)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(title, description || '', type, priority || 'medium', is_private ? 1 : 0, author_id);
+    INSERT INTO tickets (title, description, type, priority, is_private, author_id, emoji, color)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(title, description || '', type, priority || 'medium', is_private ? 1 : 0, author_id, emoji || null, color || null);
 
   const ticketId = result.lastInsertRowid;
 
@@ -369,7 +407,7 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
 
 function updateTicket(id, updates) {
   const db = getDb();
-  const allowed = ['title', 'description', 'type', 'status', 'priority', 'is_private', 'assigned_to'];
+  const allowed = ['title', 'description', 'type', 'status', 'priority', 'is_private', 'assigned_to', 'emoji', 'color'];
   const sets = [];
   const params = [];
 
@@ -535,6 +573,11 @@ module.exports = {
   getAuthToken,
   deleteAuthToken,
   cleanupAuthTokens,
+  // Sessions
+  createSession,
+  getSession,
+  deleteSession,
+  cleanupSessions,
   // Users
   findOrCreateUser,
   getUserById,

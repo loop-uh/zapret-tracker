@@ -433,14 +433,15 @@ const App = {
     }
 
     return tickets.map(t => {
-      const typeIcons = { bug: 'B', idea: 'I', feature: 'F', improvement: 'U' };
+      const icon = ticketIcon(t);
+      const colorStyle = t.color ? `border-left: 3px solid ${t.color};` : '';
       const tagsHtml = (t.tags || []).map(tag =>
         `<span class="tag" style="color:${tag.color};border-color:${tag.color}40;background:${tag.color}15">${esc(tag.name)}</span>`
       ).join('');
 
       return `
-        <div class="ticket-row" data-id="${t.id}">
-          <div class="ticket-type-icon ${t.type}">${typeIcons[t.type]}</div>
+        <div class="ticket-row" data-id="${t.id}" style="${colorStyle}">
+          ${icon}
           <div class="ticket-info">
             <div class="ticket-title-row">
               <span class="ticket-id">#${t.id}</span>
@@ -542,15 +543,16 @@ const App = {
   },
 
   renderKanbanCard(t) {
-    const typeIcons = { bug: 'B', idea: 'I', feature: 'F', improvement: 'U' };
+    const iconSmall = ticketIcon(t, true);
+    const colorStyle = t.color ? `border-left: 3px solid ${t.color};` : '';
     const tagsHtml = (t.tags || []).slice(0, 3).map(tag =>
       `<span class="tag" style="color:${tag.color};border-color:${tag.color}40;background:${tag.color}15">${esc(tag.name)}</span>`
     ).join('');
 
     return `
-      <div class="kanban-card" data-id="${t.id}">
+      <div class="kanban-card" data-id="${t.id}" style="${colorStyle}">
         <div class="kanban-card-title">
-          <span class="ticket-type-icon ${t.type}" style="width:18px;height:18px;font-size:10px;flex-shrink:0">${typeIcons[t.type]}</span>
+          ${iconSmall}
           <span>${esc(t.title)}</span>
         </div>
         <div class="ticket-tags" style="margin-bottom:6px">${tagsHtml}</div>
@@ -613,8 +615,9 @@ const App = {
 
         <div class="ticket-header">
           <h1>
-            <span class="ticket-type-icon ${t.type}" style="margin-top:4px">${{ bug: 'B', idea: 'I', feature: 'F', improvement: 'U' }[t.type]}</span>
-            ${esc(t.title)}
+            ${ticketIcon(t)}
+            <span id="ticket-title-text">${esc(t.title)}</span>
+            ${canEdit ? '<button class="btn-icon" id="edit-title-btn" title="Редактировать" style="font-size:14px;margin-left:4px;opacity:.5">&#9998;</button>' : ''}
             ${t.is_private ? '<span class="private-icon">&#128274;</span>' : ''}
           </h1>
           <div class="ticket-header-meta">
@@ -707,6 +710,18 @@ const App = {
 
             ${canEdit ? `
               <div class="sidebar-section">
+                <h3>Оформление</h3>
+                <div class="sidebar-field">
+                  <label>Эмодзи</label>
+                  <button class="btn btn-sm" id="change-emoji-btn" style="font-size:18px;min-width:40px">${t.emoji || '+'}</button>
+                </div>
+                <div class="sidebar-field">
+                  <label>Цвет</label>
+                  <input type="color" id="change-color" value="${t.color || '#0074e8'}" style="width:36px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-tertiary);cursor:pointer;padding:2px">
+                  ${t.color ? '<button class="btn-icon" id="clear-color-btn" title="Убрать цвет" style="font-size:13px;color:var(--danger)">&times;</button>' : ''}
+                </div>
+              </div>
+              <div class="sidebar-section">
                 <button class="btn btn-danger" id="delete-ticket-btn" style="width:100%">Удалить тикет</button>
               </div>
             ` : ''}
@@ -789,6 +804,66 @@ const App = {
         this.toast('Тикет удалён', 'success');
         location.hash = '';
         this.navigate('list');
+      } catch (e) { this.toast(e.message, 'error'); }
+    });
+
+    // Edit title inline
+    document.getElementById('edit-title-btn')?.addEventListener('click', () => {
+      const titleEl = document.getElementById('ticket-title-text');
+      const current = ticket.title;
+      const input = document.createElement('input');
+      input.className = 'form-input';
+      input.value = current;
+      input.style.cssText = 'font-size:22px;font-weight:700;padding:4px 8px;flex:1';
+      titleEl.replaceWith(input);
+      input.focus();
+      input.select();
+      document.getElementById('edit-title-btn').style.display = 'none';
+
+      const save = async () => {
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== current) {
+          try {
+            await this.api('PUT', `/api/tickets/${ticket.id}`, { title: newTitle });
+            this.toast('Заголовок обновлён', 'success');
+            this.navigate('ticket', { id: ticket.id });
+          } catch (e) { this.toast(e.message, 'error'); }
+        } else {
+          this.navigate('ticket', { id: ticket.id });
+        }
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') this.navigate('ticket', { id: ticket.id }); });
+    });
+
+    // Emoji picker
+    document.getElementById('change-emoji-btn')?.addEventListener('click', () => {
+      this.showEmojiPicker(async (emoji) => {
+        try {
+          await this.api('PUT', `/api/tickets/${ticket.id}`, { emoji });
+          this.toast('Эмодзи обновлён', 'success');
+          this.navigate('ticket', { id: ticket.id });
+        } catch (e) { this.toast(e.message, 'error'); }
+      });
+    });
+
+    // Color picker
+    let colorDebounce = null;
+    document.getElementById('change-color')?.addEventListener('input', (e) => {
+      clearTimeout(colorDebounce);
+      colorDebounce = setTimeout(async () => {
+        try {
+          await this.api('PUT', `/api/tickets/${ticket.id}`, { color: e.target.value });
+          this.toast('Цвет обновлён', 'success');
+        } catch (e2) { this.toast(e2.message, 'error'); }
+      }, 500);
+    });
+
+    document.getElementById('clear-color-btn')?.addEventListener('click', async () => {
+      try {
+        await this.api('PUT', `/api/tickets/${ticket.id}`, { color: '' });
+        this.toast('Цвет убран', 'success');
+        this.navigate('ticket', { id: ticket.id });
       } catch (e) { this.toast(e.message, 'error'); }
     });
 
@@ -944,6 +1019,26 @@ const App = {
             <label>Теги</label>
             <div class="tags-select" id="create-tags">${tagsHtml}</div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Эмодзи</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn" id="create-emoji-btn" style="font-size:22px;min-width:44px;min-height:38px" type="button">+</button>
+                <span style="font-size:12px;color:var(--text-muted)">Иконка тикета</span>
+              </div>
+              <input type="hidden" id="create-emoji" value="">
+            </div>
+            <div class="form-group">
+              <label>Цвет</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="color" id="create-color" value="#0074e8" style="width:44px;height:38px;border:1px solid var(--border);border-radius:6px;background:var(--bg-tertiary);cursor:pointer;padding:2px">
+                <label class="form-checkbox" style="font-size:12px">
+                  <input type="checkbox" id="create-color-enabled">
+                  Цветная метка
+                </label>
+              </div>
+            </div>
+          </div>
           <div class="form-group">
             <label class="form-checkbox">
               <input type="checkbox" id="create-private">
@@ -990,6 +1085,14 @@ const App = {
       });
     });
 
+    // Emoji in create modal
+    document.getElementById('create-emoji-btn')?.addEventListener('click', () => {
+      this.showEmojiPicker((emoji) => {
+        document.getElementById('create-emoji').value = emoji;
+        document.getElementById('create-emoji-btn').textContent = emoji;
+      });
+    });
+
     // Submit
     document.getElementById('create-submit').addEventListener('click', async () => {
       const title = document.getElementById('create-title').value.trim();
@@ -997,6 +1100,9 @@ const App = {
       const type = document.getElementById('create-type').value;
       const priority = document.getElementById('create-priority').value;
       const is_private = document.getElementById('create-private').checked;
+      const emoji = document.getElementById('create-emoji').value || null;
+      const colorEnabled = document.getElementById('create-color-enabled').checked;
+      const color = colorEnabled ? document.getElementById('create-color').value : null;
 
       if (!title) {
         this.toast('Заголовок обязателен', 'error');
@@ -1009,7 +1115,7 @@ const App = {
 
       try {
         const ticket = await this.api('POST', '/api/tickets', {
-          title, description, type, priority, is_private,
+          title, description, type, priority, is_private, emoji, color,
           tags: Array.from(selectedTags),
         });
 
@@ -1032,9 +1138,74 @@ const App = {
       }
     });
   },
+
+  // ========== Emoji Picker ==========
+  showEmojiPicker(callback) {
+    const emojis = [
+      '&#128027;', '&#128161;', '&#9889;', '&#128640;', '&#128736;', '&#128295;', '&#9881;', '&#128301;',
+      '&#128274;', '&#128275;', '&#128226;', '&#128172;', '&#127919;', '&#127942;', '&#128640;', '&#128187;',
+      '&#129302;', '&#128736;', '&#128679;', '&#128680;', '&#128681;', '&#9888;', '&#10060;', '&#9989;',
+      '&#128308;', '&#128992;', '&#128993;', '&#128994;', '&#128309;', '&#128995;', '&#9899;', '&#11035;',
+      '&#127775;', '&#128142;', '&#128293;', '&#10024;', '&#128171;', '&#127752;', '&#9729;', '&#9731;',
+      '&#128065;', '&#128064;', '&#129513;', '&#128218;', '&#128196;', '&#128203;', '&#128206;', '&#128269;',
+      '&#128736;', '&#128296;', '&#128297;', '&#128298;', '&#128299;', '&#128300;', '&#129691;', '&#129520;',
+    ];
+    // Decode HTML entities to real emoji chars for display
+    const tmp = document.createElement('div');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:380px">
+        <div class="modal-header">
+          <h2>Выберите эмодзи</h2>
+          <button class="btn-icon modal-close" style="font-size:20px">&times;</button>
+        </div>
+        <div class="modal-body" style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center">
+          ${emojis.map(e => `<button class="emoji-pick-btn" data-emoji="${e}" style="font-size:24px;width:44px;height:44px;border:1px solid var(--border);border-radius:8px;background:var(--bg-tertiary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)">${e}</button>`).join('')}
+        </div>
+        <div class="modal-footer">
+          <button class="btn" id="emoji-clear-btn">Убрать эмодзи</button>
+          <button class="btn modal-close">Отмена</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelectorAll('.modal-close').forEach(b => b.addEventListener('click', () => overlay.remove()));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelectorAll('.emoji-pick-btn').forEach(btn => {
+      btn.addEventListener('mouseenter', () => { btn.style.background = 'var(--accent-glow)'; btn.style.borderColor = 'var(--accent)'; btn.style.transform = 'scale(1.15)'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'var(--bg-tertiary)'; btn.style.borderColor = 'var(--border)'; btn.style.transform = 'scale(1)'; });
+      btn.addEventListener('click', () => {
+        tmp.innerHTML = btn.dataset.emoji;
+        callback(tmp.textContent);
+        overlay.remove();
+      });
+    });
+
+    document.getElementById('emoji-clear-btn')?.addEventListener('click', () => {
+      callback('');
+      overlay.remove();
+    });
+  },
 };
 
 // ========== Utility Functions ==========
+
+function ticketIcon(t, small = false) {
+  const s = small ? 'width:18px;height:18px;font-size:10px;flex-shrink:0' : '';
+  if (t.emoji) {
+    const size = small ? 'font-size:14px' : 'font-size:18px';
+    return `<span style="${size};line-height:1;flex-shrink:0" title="${t.type}">${esc(t.emoji)}</span>`;
+  }
+  const typeIcons = { bug: 'B', idea: 'I', feature: 'F', improvement: 'U' };
+  if (small) {
+    return `<span class="ticket-type-icon ${t.type}" style="${s}">${typeIcons[t.type]}</span>`;
+  }
+  return `<div class="ticket-type-icon ${t.type}">${typeIcons[t.type]}</div>`;
+}
 
 function esc(str) {
   if (!str) return '';

@@ -58,25 +58,24 @@ const upload = multer({
   },
 });
 
-// ========== Sessions ==========
+// ========== Sessions (persistent in SQLite) ==========
 
-const sessions = new Map();
-
-function createSession(user) {
+function createSessionToken(user) {
   const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, { userId: user.id, createdAt: Date.now() });
+  db.createSession(token, user.id);
   return token;
 }
 
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || !sessions.has(token)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  const session = sessions.get(token);
-  const user = db.getUserById(session.userId);
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+  const session = db.getSession(token);
+  if (!session) return res.status(401).json({ error: 'Unauthorized' });
+
+  const user = db.getUserById(session.user_id);
   if (!user) {
-    sessions.delete(token);
+    db.deleteSession(token);
     return res.status(401).json({ error: 'Unauthorized' });
   }
   req.user = user;
@@ -307,7 +306,7 @@ app.get('/api/auth/check/:token', (req, res) => {
     photo_url: tokenRow.photo_url,
   });
 
-  const sessionToken = createSession(user);
+  const sessionToken = createSessionToken(user);
   db.deleteAuthToken(req.params.token);
 
   res.json({ confirmed: true, token: sessionToken, user: sanitizeUser(user) });
@@ -332,7 +331,7 @@ app.post('/api/auth/dev', (req, res) => {
     chat_id: null,
   });
 
-  const token = createSession(user);
+  const token = createSessionToken(user);
   res.json({ token, user: sanitizeUser(user) });
 });
 
@@ -342,7 +341,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
 
 app.post('/api/auth/logout', authMiddleware, (req, res) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
-  sessions.delete(token);
+  db.deleteSession(token);
   res.json({ ok: true });
 });
 
@@ -401,7 +400,7 @@ app.get('/api/tickets/:id', authMiddleware, (req, res) => {
 });
 
 app.post('/api/tickets', authMiddleware, (req, res) => {
-  const { title, description, type, priority, is_private, tags } = req.body;
+  const { title, description, type, priority, is_private, tags, emoji, color } = req.body;
 
   if (!title || !type) {
     return res.status(400).json({ error: 'Title and type are required' });
@@ -413,6 +412,8 @@ app.post('/api/tickets', authMiddleware, (req, res) => {
     is_private: is_private ? 1 : 0,
     author_id: req.user.id,
     tags: tags || [],
+    emoji: emoji || null,
+    color: color || null,
   });
 
   // Notify admin about new ticket (if author is not admin)
@@ -672,6 +673,7 @@ function escHtml(str) {
 
 setInterval(() => {
   db.cleanupAuthTokens();
+  db.cleanupSessions();
 }, 5 * 60 * 1000);
 
 // ========== Start ==========
