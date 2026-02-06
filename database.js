@@ -165,6 +165,31 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_auth_tokens_created ON auth_tokens(created_at);
     CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON message_reactions(message_id);
     CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON message_reactions(user_id);
+
+    CREATE TABLE IF NOT EXISTS pinned_tickets (
+      ticket_id INTEGER PRIMARY KEY,
+      pinned_by INTEGER NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      pinned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+      FOREIGN KEY (pinned_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_replies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL,
+      parent_message_id INTEGER NOT NULL,
+      author_id INTEGER NOT NULL,
+      content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+      FOREIGN KEY (author_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pinned_tickets_order ON pinned_tickets(sort_order);
+    CREATE INDEX IF NOT EXISTS idx_thread_replies_parent ON thread_replies(parent_message_id);
+    CREATE INDEX IF NOT EXISTS idx_thread_replies_ticket ON thread_replies(ticket_id);
   `);
 
   // Insert default tags
@@ -224,6 +249,8 @@ function init() {
     "ALTER TABLE users ADD COLUMN privacy_hide_activity INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN display_avatar TEXT DEFAULT NULL",
+    // Megathread support
+    "ALTER TABLE tickets ADD COLUMN is_megathread INTEGER DEFAULT 0",
   ];
 
   // Migration: remove CHECK constraint on tickets.type by recreating the table
@@ -404,11 +431,12 @@ function createTicket({
   is_geo_request,
   geo_url,
   geo_subdomains,
+  is_megathread,
 }) {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO tickets (title, resource_name, description, type, is_resource_request, resource_protocol, resource_ports, priority, is_private, author_id, emoji, color, is_geo_request, geo_url, geo_subdomains)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tickets (title, resource_name, description, type, is_resource_request, resource_protocol, resource_ports, priority, is_private, author_id, emoji, color, is_geo_request, geo_url, geo_subdomains, is_megathread)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     title,
     resource_name || null,
@@ -425,6 +453,7 @@ function createTicket({
     is_geo_request ? 1 : 0,
     geo_url || null,
     geo_subdomains || null,
+    is_megathread ? 1 : 0,
   );
 
   const ticketId = result.lastInsertRowid;
@@ -901,6 +930,137 @@ function getStats() {
   };
 }
 
+// ========== Pinned Tickets ==========
+
+function pinTicket(ticketId, userId) {
+  const db = getDb();
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as m FROM pinned_tickets').get().m;
+  db.prepare('INSERT OR REPLACE INTO pinned_tickets (ticket_id, pinned_by, sort_order, pinned_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)')
+    .run(ticketId, userId, maxOrder + 1);
+}
+
+function unpinTicket(ticketId) {
+  getDb().prepare('DELETE FROM pinned_tickets WHERE ticket_id = ?').run(ticketId);
+}
+
+function isPinned(ticketId) {
+  return !!getDb().prepare('SELECT 1 FROM pinned_tickets WHERE ticket_id = ?').get(ticketId);
+}
+
+function getPinnedTickets({ is_admin, user_id }) {
+  const db = getDb();
+  let privacyFilter = '';
+  const params = [];
+  if (!is_admin) {
+    privacyFilter = 'AND (t.is_private = 0 OR t.author_id = ?)';
+    params.push(user_id);
+  }
+
+  const tickets = db.prepare(`
+    SELECT t.*,
+      u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+      u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden,
+      p.pinned_at, p.sort_order as pin_order,
+      (SELECT COUNT(*) FROM messages m WHERE m.ticket_id = t.id AND m.is_system = 0) as message_count
+    FROM pinned_tickets p
+    JOIN tickets t ON p.ticket_id = t.id
+    JOIN users u ON t.author_id = u.id
+    WHERE 1=1 ${privacyFilter}
+    ORDER BY p.sort_order ASC
+  `).all(...params);
+
+  const getTagsStmt = db.prepare('SELECT tg.* FROM tags tg JOIN ticket_tags tt ON tg.id = tt.tag_id WHERE tt.ticket_id = ?');
+  for (const ticket of tickets) {
+    ticket.tags = getTagsStmt.all(ticket.id);
+    ticket.is_pinned = true;
+  }
+
+  return tickets;
+}
+
+function reorderPinnedTickets(ticketIds) {
+  const db = getDb();
+  const stmt = db.prepare('UPDATE pinned_tickets SET sort_order = ? WHERE ticket_id = ?');
+  const txn = db.transaction((ids) => {
+    ids.forEach((id, i) => stmt.run(i + 1, id));
+  });
+  txn(ticketIds);
+}
+
+// ========== Thread Replies (Sub-threads for Megathreads) ==========
+
+function addThreadReply({ ticket_id, parent_message_id, author_id, content }) {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO thread_replies (ticket_id, parent_message_id, author_id, content)
+    VALUES (?, ?, ?, ?)
+  `).run(ticket_id, parent_message_id, author_id, content);
+
+  db.prepare('UPDATE tickets SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(ticket_id);
+
+  return db.prepare(`
+    SELECT tr.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM thread_replies tr JOIN users u ON tr.author_id = u.id WHERE tr.id = ?
+  `).get(result.lastInsertRowid);
+}
+
+function getThreadReplies(parentMessageId) {
+  return getDb().prepare(`
+    SELECT tr.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM thread_replies tr
+    JOIN users u ON tr.author_id = u.id
+    WHERE tr.parent_message_id = ?
+    ORDER BY tr.created_at ASC
+  `).all(parentMessageId);
+}
+
+function getThreadRepliesForTicket(ticketId) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT tr.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM thread_replies tr
+    JOIN users u ON tr.author_id = u.id
+    WHERE tr.ticket_id = ?
+    ORDER BY tr.created_at ASC
+  `).all(ticketId);
+
+  // Group by parent_message_id
+  const result = {};
+  for (const row of rows) {
+    if (!result[row.parent_message_id]) result[row.parent_message_id] = [];
+    result[row.parent_message_id].push(row);
+  }
+  return result;
+}
+
+function getThreadReplyById(id) {
+  return getDb().prepare(`
+    SELECT tr.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM thread_replies tr JOIN users u ON tr.author_id = u.id WHERE tr.id = ?
+  `).get(id);
+}
+
+function deleteThreadReply(id) {
+  getDb().prepare('DELETE FROM thread_replies WHERE id = ?').run(id);
+}
+
+function getThreadReplyCountsForTicket(ticketId) {
+  const rows = getDb().prepare(`
+    SELECT parent_message_id, COUNT(*) as count FROM thread_replies WHERE ticket_id = ? GROUP BY parent_message_id
+  `).all(ticketId);
+  const result = {};
+  for (const r of rows) result[r.parent_message_id] = r.count;
+  return result;
+}
+
 module.exports = {
   init,
   getDb,
@@ -963,4 +1123,17 @@ module.exports = {
   getMessagesSince,
   // Stats
   getStats,
+  // Pinned Tickets
+  pinTicket,
+  unpinTicket,
+  isPinned,
+  getPinnedTickets,
+  reorderPinnedTickets,
+  // Thread Replies (Megathreads)
+  addThreadReply,
+  getThreadReplies,
+  getThreadRepliesForTicket,
+  getThreadReplyById,
+  deleteThreadReply,
+  getThreadReplyCountsForTicket,
 };
