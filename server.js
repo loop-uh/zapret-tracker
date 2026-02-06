@@ -41,7 +41,7 @@ app.get('/', (req, res) => {
   <meta http-equiv="Expires" content="0">
   <title>Zapret Tracker — Баги и Идеи</title>
   <link rel="stylesheet" href="/css/style.css?v=${APP_VERSION}">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡</text></svg>">
+  <link rel="icon" type="image/x-icon" href="/img/Zapret2.ico">
   <script src="https://telegram.org/js/telegram-web-app.js"><\/script>
 </head>
 <body>

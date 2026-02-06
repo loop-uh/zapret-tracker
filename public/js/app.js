@@ -165,7 +165,7 @@ const App = {
       <div class="header">
         <div class="header-left">
           <div class="logo">
-            <div class="logo-icon">Z</div>
+            <img class="logo-icon" src="/img/Zapret2.ico" alt="Zapret" style="width:32px;height:32px;border-radius:6px">
             Zapret Tracker
           </div>
         </div>
@@ -361,7 +361,7 @@ const App = {
             <span></span><span></span><span></span>
           </button>
           <div class="logo" style="cursor:pointer" data-nav="list">
-            <div class="logo-icon">Z</div>
+            <img class="logo-icon" src="/img/Zapret2.ico" alt="Zapret" style="width:32px;height:32px;border-radius:6px">
             <span class="logo-text">Zapret Tracker</span>
           </div>
           <nav class="nav" id="main-nav">
@@ -1410,7 +1410,7 @@ const App = {
                     <span class="message-author">${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
                     <span class="message-date">${timeAgo(t.created_at)}</span>
                   </div>
-                  <div class="ticket-description">${t.description ? esc(t.description) : '<span style="color:var(--text-muted)">Нет описания</span>'}</div>
+                  <div class="ticket-description markdown-body">${t.description ? renderMarkdown(t.description) : '<span style="color:var(--text-muted)">Нет описания</span>'}</div>
                   ${attachmentsHtml ? `<div class="ticket-attachments">${attachmentsHtml}</div>` : ''}
                 </div>
               </div>
@@ -1437,7 +1437,9 @@ const App = {
               </div>
               ` : `
               <div class="message-form" id="message-form">
-                <textarea class="message-textarea" id="message-input" placeholder="Написать сообщение... (Ctrl+Enter для отправки)"></textarea>
+                ${mdToolbarHtml('message-input')}
+                <textarea class="message-textarea" id="message-input" placeholder="Написать сообщение... Поддерживается Markdown (Ctrl+Enter отправить)"></textarea>
+                <div class="md-preview markdown-body" id="message-preview" style="display:none"></div>
                 <div class="file-preview-list" id="file-preview-list"></div>
                 <div class="message-form-footer">
                   <div>
@@ -1692,6 +1694,10 @@ const App = {
       } catch (e) { this.toast(e.message, 'error'); }
     });
 
+    // Bind markdown toolbar for the message form
+    const mdToolbar = document.querySelector('#message-form .md-toolbar');
+    if (mdToolbar) bindMdToolbar(mdToolbar, 'message-input');
+
     // File attach & message form (only if ticket is not archived)
     const attachBtn = document.getElementById('attach-btn');
     const fileInput = document.getElementById('file-input');
@@ -1860,10 +1866,23 @@ const App = {
         const contentEl = document.getElementById(`msg-content-${msgId}`);
         if (!contentEl) return;
 
-        const currentText = contentEl.textContent;
+        // Use raw content from data attribute if available, otherwise fall back to textContent
+        const currentText = contentEl.dataset.raw || contentEl.textContent;
+        const editWrap = document.createElement('div');
+        editWrap.className = 'md-editor-wrap';
+
         const textarea = document.createElement('textarea');
         textarea.className = 'message-edit-textarea';
         textarea.value = currentText;
+
+        const previewDiv = document.createElement('div');
+        previewDiv.className = 'md-preview markdown-body';
+        previewDiv.style.display = 'none';
+
+        editWrap.innerHTML = mdToolbarHtml('edit-ta-' + msgId);
+        textarea.id = 'edit-ta-' + msgId;
+        editWrap.appendChild(textarea);
+        editWrap.appendChild(previewDiv);
 
         const btnRow = document.createElement('div');
         btnRow.className = 'message-edit-actions';
@@ -1873,13 +1892,17 @@ const App = {
         `;
 
         contentEl.style.display = 'none';
-        contentEl.parentNode.insertBefore(textarea, contentEl.nextSibling);
-        contentEl.parentNode.insertBefore(btnRow, textarea.nextSibling);
+        contentEl.parentNode.insertBefore(editWrap, contentEl.nextSibling);
+        contentEl.parentNode.insertBefore(btnRow, editWrap.nextSibling);
         textarea.focus();
         textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 
+        // Bind the toolbar
+        const editToolbar = editWrap.querySelector('.md-toolbar');
+        if (editToolbar) bindMdToolbar(editToolbar, textarea);
+
         const cancel = () => {
-          textarea.remove();
+          editWrap.remove();
           btnRow.remove();
           contentEl.style.display = '';
         };
@@ -1898,7 +1921,8 @@ const App = {
 
           try {
             const updated = await this.api('PUT', `/api/messages/${msgId}`, { content: newContent });
-            contentEl.textContent = updated.content;
+            contentEl.innerHTML = renderMarkdown(updated.content);
+            contentEl.dataset.raw = updated.content;
             cancel();
             this.toast('Сообщение отредактировано', 'success');
           } catch (e) {
@@ -2106,7 +2130,7 @@ const App = {
             <span class="message-date">${timeAgo(m.created_at)}</span>
             ${actionsHtml}
           </div>
-          <div class="message-content" id="msg-content-${m.id}">${esc(m.content)}</div>
+          <div class="message-content markdown-body" id="msg-content-${m.id}">${renderMarkdown(m.content)}</div>
           ${attachmentsHtml ? `<div class="message-attachments">${attachmentsHtml}</div>` : ''}
           <div class="message-reactions" id="msg-reactions-${m.id}">${reactionsHtml}</div>
           ${replyCountHtml}
@@ -2766,7 +2790,7 @@ const App = {
     container.innerHTML = `
       <div class="about-view">
         <div class="about-header">
-          <div class="logo-icon" style="width:64px;height:64px;font-size:28px;margin:0 auto 16px;border-radius:16px;background:linear-gradient(135deg,#0074e8,#4da3ff);display:flex;align-items:center;justify-content:center;font-weight:800">Z</div>
+          <img src="/img/Zapret2.ico" alt="Zapret" style="width:64px;height:64px;margin:0 auto 16px;border-radius:16px;display:block">
           <h1>Zapret GUI</h1>
           <p>Инструмент для обхода блокировок интернет-ресурсов в России</p>
         </div>
@@ -3266,6 +3290,153 @@ function esc(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// ========== Markdown Rendering ==========
+function renderMarkdown(text) {
+  if (!text) return '';
+  if (typeof marked === 'undefined') return esc(text);
+  try {
+    const html = marked.parse(text, { breaks: true, gfm: true });
+    if (typeof DOMPurify !== 'undefined') {
+      return DOMPurify.sanitize(html, {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
+          'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+          'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'img', 'span', 'div', 'sup', 'sub', 'input'],
+        ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'title', 'class', 'type', 'checked', 'disabled'],
+        ADD_ATTR: ['target'],
+      });
+    }
+    return html;
+  } catch (e) {
+    return esc(text);
+  }
+}
+
+function mdInsert(textarea, before, after, placeholder) {
+  const ta = typeof textarea === 'string' ? document.getElementById(textarea) : textarea;
+  if (!ta) return;
+  ta.focus();
+  const start = ta.selectionStart;
+  const end = ta.selectionEnd;
+  const selected = ta.value.substring(start, end);
+  const text = selected || placeholder || '';
+  const replacement = before + text + (after || '');
+  ta.setRangeText(replacement, start, end, 'select');
+  if (!selected && placeholder) {
+    ta.selectionStart = start + before.length;
+    ta.selectionEnd = start + before.length + placeholder.length;
+  } else {
+    ta.selectionStart = start + before.length;
+    ta.selectionEnd = start + before.length + text.length;
+  }
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function mdToolbarHtml(textareaId) {
+  return `
+    <div class="md-toolbar" data-textarea="${textareaId}">
+      <button type="button" class="md-toolbar-btn" data-md-action="bold" title="Жирный (Ctrl+B)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h8a4 4 0 0 1 2.82 6.84A4 4 0 0 1 15 18H6V4zm2 2v4h6a2 2 0 1 0 0-4H8zm0 6v4h7a2 2 0 1 0 0-4H8z"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="italic" title="Курсив (Ctrl+I)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4v2h2.58l-3.66 12H6v2h8v-2h-2.58l3.66-12H18V4z"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="strikethrough" title="Зачёркнутый">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.154 14c.23.516.346 1.09.346 1.72 0 1.342-.524 2.392-1.571 3.147C14.88 19.622 13.433 20 11.586 20c-1.64 0-3.263-.381-4.866-1.144V16.6c1.52.877 3.075 1.316 4.666 1.316 2.551 0 3.83-.732 3.839-2.197a2.21 2.21 0 0 0-.648-1.603l-.12-.116H3v-2h18v2h-3.846zM7.556 11c-.36-.606-.54-1.27-.54-1.99 0-1.347.55-2.412 1.648-3.196C9.764 5.272 11.189 4.88 12.94 4.88c1.418 0 2.835.333 4.252.997v2.16c-1.336-.76-2.752-1.14-4.247-1.14-1.204 0-2.14.228-2.81.685-.667.458-1.004 1.055-1.012 1.79 0 .433.132.833.397 1.198l.172.23H7.556z"/></svg>
+      </button>
+      <span class="md-toolbar-sep"></span>
+      <button type="button" class="md-toolbar-btn" data-md-action="heading" title="Заголовок">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h2v7h8V4h2v16h-2v-7H6v7H4V4z"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="code" title="Код">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="codeblock" title="Блок кода">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 8 5 12 9 16"/><polyline points="15 8 19 12 15 16"/></svg>
+      </button>
+      <span class="md-toolbar-sep"></span>
+      <button type="button" class="md-toolbar-btn" data-md-action="link" title="Ссылка (Ctrl+K)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="ul" title="Маркированный список">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0 7.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0 7.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM8 5h14v2H8V5zm0 7h14v2H8v-2zm0 7h14v2H8v-2z"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="ol" title="Нумерованный список">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h2v4H4V5H3V4zm0 8.5h2.5V14H3v1h2.5v1.5H2V18h4v-5.5H3.5V11H6V9.5H3v3zM8 5h14v2H8V5zm0 7h14v2H8v-2zm0 7h14v2H8v-2z"/></svg>
+      </button>
+      <button type="button" class="md-toolbar-btn" data-md-action="quote" title="Цитата">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4.583 17.321C3.553 16.227 3 15 3 13.011c0-3.5 2.457-6.637 6.03-8.188l.893 1.378c-3.335 1.804-3.987 4.145-4.247 5.621.537-.278 1.24-.375 1.929-.311 1.804.167 3.226 1.648 3.226 3.489a3.5 3.5 0 0 1-3.5 3.5c-1.073 0-2.099-.49-2.748-1.179zm10 0C13.553 16.227 13 15 13 13.011c0-3.5 2.457-6.637 6.03-8.188l.893 1.378c-3.335 1.804-3.987 4.145-4.247 5.621.537-.278 1.24-.375 1.929-.311 1.804.167 3.226 1.648 3.226 3.489a3.5 3.5 0 0 1-3.5 3.5c-1.073 0-2.099-.49-2.748-1.179z"/></svg>
+      </button>
+      <span class="md-toolbar-sep"></span>
+      <button type="button" class="md-toolbar-btn md-preview-toggle" data-md-action="preview" title="Предпросмотр">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+    </div>
+  `;
+}
+
+function bindMdToolbar(toolbarEl, textareaRef) {
+  if (!toolbarEl) return;
+  toolbarEl.querySelectorAll('.md-toolbar-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const action = btn.dataset.mdAction;
+      const ta = typeof textareaRef === 'string' ? document.getElementById(textareaRef) : textareaRef;
+      if (!ta && action !== 'preview') return;
+
+      switch (action) {
+        case 'bold': mdInsert(ta, '**', '**', 'жирный текст'); break;
+        case 'italic': mdInsert(ta, '_', '_', 'курсив'); break;
+        case 'strikethrough': mdInsert(ta, '~~', '~~', 'зачёркнуто'); break;
+        case 'heading': mdInsert(ta, '### ', '', 'Заголовок'); break;
+        case 'code': mdInsert(ta, '`', '`', 'код'); break;
+        case 'codeblock': mdInsert(ta, '```\n', '\n```', 'код'); break;
+        case 'link': {
+          const selected = ta.value.substring(ta.selectionStart, ta.selectionEnd);
+          if (selected) {
+            mdInsert(ta, '[', '](url)', '');
+          } else {
+            mdInsert(ta, '[', '](url)', 'текст ссылки');
+          }
+          break;
+        }
+        case 'ul': mdInsert(ta, '- ', '', 'элемент списка'); break;
+        case 'ol': mdInsert(ta, '1. ', '', 'элемент списка'); break;
+        case 'quote': mdInsert(ta, '> ', '', 'цитата'); break;
+        case 'preview': {
+          const form = toolbarEl.closest('.message-form') || toolbarEl.closest('.md-editor-wrap');
+          const previewEl = form?.querySelector('.md-preview');
+          const textareaEl = form?.querySelector('textarea');
+          if (previewEl && textareaEl) {
+            const isVisible = previewEl.style.display !== 'none';
+            if (isVisible) {
+              previewEl.style.display = 'none';
+              textareaEl.style.display = '';
+              btn.classList.remove('active');
+            } else {
+              previewEl.innerHTML = renderMarkdown(textareaEl.value) || '<span style="color:var(--text-muted)">Предпросмотр пуст</span>';
+              previewEl.style.display = 'block';
+              textareaEl.style.display = 'none';
+              btn.classList.add('active');
+            }
+          }
+          break;
+        }
+      }
+    });
+  });
+
+  const ta = typeof textareaRef === 'string' ? document.getElementById(textareaRef) : textareaRef;
+  if (ta && !ta._mdShortcuts) {
+    ta._mdShortcuts = true;
+    ta.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'b') { e.preventDefault(); mdInsert(ta, '**', '**', 'жирный текст'); }
+      if (e.ctrlKey && e.key === 'i') { e.preventDefault(); mdInsert(ta, '_', '_', 'курсив'); }
+      if (e.ctrlKey && e.key === 'k') { e.preventDefault(); mdInsert(ta, '[', '](url)', 'текст ссылки'); }
+    });
+  }
 }
 
 function statusLabel(status) {
