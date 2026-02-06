@@ -3156,7 +3156,7 @@ const App = {
       const data = await this.api('GET', '/api/presets?sort=newest');
       this._presetsData = data;
       const esc = (s) => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
-      const formatDate = (d) => { if (!d) return ''; const dt = new Date(d + (d.includes('T') ? '' : 'T00:00:00')); return dt.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
+      const formatDate = (d) => { if (!d) return ''; const s = String(d).includes('T') ? d : String(d).replace(' ', 'T'); const dt = new Date(s); if (isNaN(dt)) return ''; return dt.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
       const formatSize = (bytes) => { if (!bytes) return '0 B'; if (bytes < 1024) return bytes + ' B'; if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB'; return (bytes/1024/1024).toFixed(1) + ' MB'; };
       const presetCards = data.presets.map(p => {
         const authorName = p.author_username ? '@' + esc(p.author_username) : esc(p.author_first_name);
@@ -3229,7 +3229,7 @@ const App = {
       let fileContent = null;
       try { const fc = await this.api('GET', '/api/presets/' + id + '/content'); fileContent = fc.content; } catch {}
       const esc = (s) => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
-      const formatDate = (d) => { if (!d) return ''; const dt = new Date(d + (d.includes('T') ? '' : 'T00:00:00')); return dt.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
+      const formatDate = (d) => { if (!d) return ''; const s = String(d).includes('T') ? d : String(d).replace(' ', 'T'); const dt = new Date(s); if (isNaN(dt)) return ''; return dt.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
       const formatSize = (bytes) => { if (!bytes) return '0 B'; if (bytes < 1024) return bytes + ' B'; if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB'; return (bytes/1024/1024).toFixed(1) + ' MB'; };
       const authorName = preset.author_username ? '@' + esc(preset.author_username) : esc(preset.author_first_name);
       const avatarHtml = preset.author_photo ? '<img src="' + esc(preset.author_photo) + '" class="avatar-md" alt="">' : '<div class="avatar-md avatar-placeholder">' + esc((preset.author_first_name || '?')[0]) + '</div>';
