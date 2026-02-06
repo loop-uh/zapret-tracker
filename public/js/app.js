@@ -1465,6 +1465,9 @@ const App = {
         }
         return `<div class="attachment-preview lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" style="background-image:url('/uploads/${a.filename}')"></div>`;
       }
+      if (isVideoAttachment(a)) {
+        return `<div class="attachment-video-wrapper"><video class="attachment-video" src="/uploads/${a.filename}" controls preload="metadata" playsinline></video><div class="attachment-video-name">${esc(a.original_name)}</div></div>`;
+      }
       return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)}</a>`;
     }).join('');
 
@@ -2302,6 +2305,9 @@ const App = {
           return `<img class="attachment-preview attachment-preview-gif lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" src="/uploads/${a.filename}" alt="${esc(a.original_name)}" draggable="false">`;
         }
         return `<div class="attachment-preview lightbox-trigger" data-src="/uploads/${a.filename}" data-alt="${esc(a.original_name)}" style="background-image:url('/uploads/${a.filename}')"></div>`;
+      }
+      if (isVideoAttachment(a)) {
+        return `<div class="attachment-video-wrapper"><video class="attachment-video" src="/uploads/${a.filename}" controls preload="metadata" playsinline></video><div class="attachment-video-name">${esc(a.original_name)} (${formatSize(a.size)})</div></div>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
     }).join('');
@@ -3905,6 +3911,13 @@ function isGifAttachment(att) {
   if (mt === 'image/gif') return true;
   const name = (att?.original_name || att?.filename || '').toLowerCase();
   return /\.gif$/i.test(name);
+}
+
+function isVideoAttachment(att) {
+  const mt = (att?.mime_type || '').toLowerCase();
+  if (mt.startsWith('video/')) return true;
+  const name = (att?.original_name || att?.filename || '').toLowerCase();
+  return /\.(mp4|webm)$/i.test(name);
 }
 
 // Broken background-image previews: detect load failures via hidden probe img

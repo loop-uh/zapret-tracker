@@ -2409,19 +2409,24 @@ const presetUpload = multer({
 
 // List presets
 app.get('/api/presets', authMiddleware, (req, res) => {
-  const { search, author_id, sort, page } = req.query;
-  const result = db.getPresets({
-    search,
-    author_id: author_id ? parseInt(author_id) : undefined,
-    sort: sort || undefined,
-    page: parseInt(page) || 1,
-  });
+  try {
+    const { search, author_id, sort, page } = req.query;
+    const result = db.getPresets({
+      search,
+      author_id: author_id ? parseInt(author_id) : undefined,
+      sort: sort || undefined,
+      page: parseInt(page) || 1,
+    });
 
-  // Apply privacy masking to preset authors
-  for (const p of result.presets) {
-    applyMaskToPresetAuthor(p, req.user);
+    // Apply privacy masking to preset authors
+    for (const p of result.presets) {
+      applyMaskToPresetAuthor(p, req.user);
+    }
+    res.json(result);
+  } catch (e) {
+    console.error('GET /api/presets error:', e);
+    res.status(500).json({ error: e.message });
   }
-  res.json(result);
 });
 
 // Get single preset with comments
