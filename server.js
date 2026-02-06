@@ -2512,33 +2512,43 @@ app.post('/api/presets', authMiddleware, presetUpload.single('file'), (req, res)
 
 // Update preset (title/description only)
 app.put('/api/presets/:id', authMiddleware, (req, res) => {
-  const preset = db.getPresetById(parseInt(req.params.id));
-  if (!preset) return res.status(404).json({ error: 'Preset not found' });
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
 
-  if (!req.user.is_admin && preset.author_id !== req.user.id) {
-    return res.status(403).json({ error: 'Access denied' });
+    if (!req.user.is_admin && preset.author_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const updated = db.updatePreset(parseInt(req.params.id), req.body);
+    applyMaskToPresetAuthor(updated, req.user);
+    res.json(updated);
+  } catch (e) {
+    console.error('PUT /api/presets/:id error:', e);
+    res.status(500).json({ error: e.message });
   }
-
-  const updated = db.updatePreset(parseInt(req.params.id), req.body);
-  applyMaskToPresetAuthor(updated, req.user);
-  res.json(updated);
 });
 
 // Delete preset
 app.delete('/api/presets/:id', authMiddleware, (req, res) => {
-  const preset = db.getPresetById(parseInt(req.params.id));
-  if (!preset) return res.status(404).json({ error: 'Preset not found' });
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
 
-  if (!req.user.is_admin && preset.author_id !== req.user.id) {
-    return res.status(403).json({ error: 'Access denied' });
+    if (!req.user.is_admin && preset.author_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    // Delete file from disk
+    const filePath = path.join(CONFIG.uploadDir, preset.filename);
+    safeUnlink(filePath);
+
+    db.deletePreset(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/presets/:id error:', e);
+    res.status(500).json({ error: e.message });
   }
-
-  // Delete file from disk
-  const filePath = path.join(CONFIG.uploadDir, preset.filename);
-  safeUnlink(filePath);
-
-  db.deletePreset(parseInt(req.params.id));
-  res.json({ ok: true });
 });
 
 // Add comment to preset
