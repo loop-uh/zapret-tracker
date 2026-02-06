@@ -131,6 +131,16 @@ function init() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS ticket_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      emoji TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT '#6c757d',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
     CREATE INDEX IF NOT EXISTS idx_tickets_type ON tickets(type);
@@ -168,6 +178,21 @@ function init() {
   });
   insertMany(defaultTags);
 
+  // Insert default ticket types
+  const insertType = db.prepare('INSERT OR IGNORE INTO ticket_types (key, name, emoji, color, sort_order) VALUES (?, ?, ?, ?, ?)');
+  const defaultTypes = [
+    ['bug', 'Баг', '\uD83D\uDC1B', '#e8364d', 1],
+    ['idea', 'Идея', '\uD83D\uDCA1', '#4da3ff', 2],
+    ['feature', 'Фича', '\uD83D\uDE80', '#22c55e', 3],
+    ['improvement', 'Улучшение', '\u2B50', '#8b5cf6', 4],
+  ];
+  const insertManyTypes = db.transaction((types) => {
+    for (const [key, name, emoji, color, sort_order] of types) {
+      insertType.run(key, name, emoji, color, sort_order);
+    }
+  });
+  insertManyTypes(defaultTypes);
+
   // Migrations: add columns safely
   const migrations = [
     "ALTER TABLE tickets ADD COLUMN emoji TEXT DEFAULT NULL",
@@ -176,6 +201,10 @@ function init() {
     "ALTER TABLE tickets ADD COLUMN resource_protocol TEXT DEFAULT NULL",
     "ALTER TABLE tickets ADD COLUMN resource_ports TEXT DEFAULT NULL",
     "ALTER TABLE tickets ADD COLUMN resource_name TEXT DEFAULT NULL",
+    // Geo-restriction requests
+    "ALTER TABLE tickets ADD COLUMN is_geo_request INTEGER DEFAULT 0",
+    "ALTER TABLE tickets ADD COLUMN geo_url TEXT DEFAULT NULL",
+    "ALTER TABLE tickets ADD COLUMN geo_subdomains TEXT DEFAULT NULL",
     // Privacy settings
     "ALTER TABLE users ADD COLUMN privacy_hidden INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN privacy_hide_online INTEGER DEFAULT 0",
@@ -183,6 +212,52 @@ function init() {
     "ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN display_avatar TEXT DEFAULT NULL",
   ];
+
+  // Migration: remove CHECK constraint on tickets.type by recreating the table
+  // This allows dynamic ticket types managed from the admin panel
+  try {
+    const hasCheck = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='tickets'").get();
+    if (hasCheck && hasCheck.sql && hasCheck.sql.includes("CHECK(type IN")) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tickets_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          resource_name TEXT,
+          description TEXT,
+          type TEXT NOT NULL,
+          is_resource_request INTEGER DEFAULT 0,
+          resource_protocol TEXT,
+          resource_ports TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'in_progress', 'review', 'testing', 'closed', 'rejected', 'duplicate')),
+          priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high', 'critical')),
+          emoji TEXT,
+          color TEXT,
+          is_private INTEGER DEFAULT 0,
+          author_id INTEGER NOT NULL,
+          assigned_to INTEGER,
+          votes_count INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          closed_at DATETIME,
+          is_geo_request INTEGER DEFAULT 0,
+          geo_url TEXT,
+          geo_subdomains TEXT,
+          FOREIGN KEY (author_id) REFERENCES users(id),
+          FOREIGN KEY (assigned_to) REFERENCES users(id)
+        );
+        INSERT INTO tickets_new SELECT id, title, resource_name, description, type, is_resource_request, resource_protocol, resource_ports, status, priority, emoji, color, is_private, author_id, assigned_to, votes_count, created_at, updated_at, closed_at, is_geo_request, geo_url, geo_subdomains FROM tickets;
+        DROP TABLE tickets;
+        ALTER TABLE tickets_new RENAME TO tickets;
+        CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
+        CREATE INDEX IF NOT EXISTS idx_tickets_type ON tickets(type);
+        CREATE INDEX IF NOT EXISTS idx_tickets_author ON tickets(author_id);
+        CREATE INDEX IF NOT EXISTS idx_tickets_private ON tickets(is_private);
+      `);
+    }
+  } catch (e) {
+    // Migration may fail if already applied or column mismatch — that's ok
+    console.log('Type CHECK migration note:', e.message);
+  }
   for (const sql of migrations) {
     try { db.exec(sql); } catch {}
   }
@@ -313,11 +388,14 @@ function createTicket({
   resource_protocol,
   resource_ports,
   resource_name,
+  is_geo_request,
+  geo_url,
+  geo_subdomains,
 }) {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO tickets (title, resource_name, description, type, is_resource_request, resource_protocol, resource_ports, priority, is_private, author_id, emoji, color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tickets (title, resource_name, description, type, is_resource_request, resource_protocol, resource_ports, priority, is_private, author_id, emoji, color, is_geo_request, geo_url, geo_subdomains)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     title,
     resource_name || null,
@@ -331,6 +409,9 @@ function createTicket({
     author_id,
     emoji || null,
     color || null,
+    is_geo_request ? 1 : 0,
+    geo_url || null,
+    geo_subdomains || null,
   );
 
   const ticketId = result.lastInsertRowid;
@@ -688,6 +769,45 @@ function getMessagesSince(ticketId, afterId) {
   return messages;
 }
 
+// ========== Ticket Types ==========
+
+function getAllTicketTypes() {
+  return getDb().prepare('SELECT * FROM ticket_types ORDER BY sort_order ASC, id ASC').all();
+}
+
+function getTicketTypeByKey(key) {
+  return getDb().prepare('SELECT * FROM ticket_types WHERE key = ?').get(key);
+}
+
+function createTicketType({ key, name, emoji, color, sort_order }) {
+  const db = getDb();
+  const result = db.prepare('INSERT INTO ticket_types (key, name, emoji, color, sort_order) VALUES (?, ?, ?, ?, ?)').run(
+    key, name, emoji || '', color || '#6c757d', sort_order || 0
+  );
+  return db.prepare('SELECT * FROM ticket_types WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function updateTicketType(id, updates) {
+  const db = getDb();
+  const allowed = ['key', 'name', 'emoji', 'color', 'sort_order'];
+  const sets = [];
+  const params = [];
+  for (const k of allowed) {
+    if (updates[k] !== undefined) {
+      sets.push(`${k} = ?`);
+      params.push(updates[k]);
+    }
+  }
+  if (sets.length === 0) return getDb().prepare('SELECT * FROM ticket_types WHERE id = ?').get(id);
+  params.push(id);
+  db.prepare(`UPDATE ticket_types SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  return db.prepare('SELECT * FROM ticket_types WHERE id = ?').get(id);
+}
+
+function deleteTicketType(id) {
+  return getDb().prepare('DELETE FROM ticket_types WHERE id = ?').run(id);
+}
+
 // ========== Stats ==========
 
 function getStats() {
@@ -748,6 +868,12 @@ module.exports = {
   // Tags
   getAllTags,
   createTag,
+  // Ticket Types
+  getAllTicketTypes,
+  getTicketTypeByKey,
+  createTicketType,
+  updateTicketType,
+  deleteTicketType,
   // User settings
   getUserSettings,
   updateUserSettings,

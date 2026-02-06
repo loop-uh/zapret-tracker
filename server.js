@@ -14,7 +14,7 @@ const CONFIG = {
   botUsername: process.env.BOT_USERNAME || '',
   siteUrl: process.env.SITE_URL || 'http://88.210.52.47',
   adminTelegramId: 6483277608,
-  maxFileSize: 50 * 1024 * 1024, // 50MB
+  maxFileSize: 5 * 1024 * 1024, // 5MB
   uploadDir: path.join(__dirname, 'uploads'),
   sessionSecret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
 };
@@ -953,10 +953,14 @@ app.post('/api/tickets', authMiddleware, (req, res) => {
 
   // Notify admin about new ticket (if author is not admin)
   if (!req.user.is_admin) {
-    const typeLabels = { bug: 'Баг', idea: 'Идея', feature: 'Фича', improvement: 'Улучшение' };
+    const allTypes = db.getAllTicketTypes();
+    const typeLabels = {};
+    for (const tt of allTypes) typeLabels[tt.key] = tt.name;
     const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
+    const typeObj = allTypes.find(tt => tt.key === type);
+    const typeEmoji = typeObj && typeObj.emoji ? typeObj.emoji + ' ' : '';
     notifyAdmin(
-      `🆕 Новый ${typeLabels[type]}: <b>${escHtml(title)}</b>\n` +
+      `🆕 ${typeEmoji}Новый ${typeLabels[type] || type}: <b>${escHtml(title)}</b>\n` +
       `Автор: ${authorName}\n` +
       `Приоритет: ${priority || 'medium'}\n` +
       (is_private ? '🔒 Приватный' : '🌐 Публичный')
@@ -1123,6 +1127,103 @@ app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (r
       `Протокол: ${normalizedProtocol.toUpperCase()}\n` +
       `Порты: ${escHtml(cleanPorts)}\n` +
       `Файлов: ${req.files.length}`
+    );
+  }
+
+  const fullTicket = db.getTicketById(ticket.id);
+  fullTicket.messages = db.getMessages(ticket.id);
+  fullTicket.user_voted = false;
+  fullTicket.user_subscribed = db.isSubscribed(req.user.id, ticket.id);
+
+  res.json(fullTicket);
+});
+
+// --- Geo-restriction Requests ---
+// For sites/services that block Russian users themselves (not blocked by RKN)
+
+app.post('/api/geo-requests', authMiddleware, upload.array('files', 20), (req, res) => {
+  const { resource_name, geo_url, geo_subdomains, message, is_private } = req.body;
+
+  // Validate uploads if any
+  if (req.files && req.files.length > 0) {
+    for (const f of req.files) {
+      const v = classifyAndValidateUpload(f);
+      if (!v.ok) {
+        cleanupMulterFiles(req.files);
+        return res.status(400).json({ error: v.error });
+      }
+      if (v.detectedMimeType) f._detectedMimeType = v.detectedMimeType;
+    }
+  }
+
+  if (!resource_name || !resource_name.trim()) {
+    return res.status(400).json({ error: 'Название сайта/сервиса обязательно' });
+  }
+
+  if (!geo_url || !geo_url.trim()) {
+    return res.status(400).json({ error: 'URL сайта/сервиса обязателен' });
+  }
+
+  if (!geo_subdomains || !geo_subdomains.trim()) {
+    return res.status(400).json({ error: 'Субдомены обязательны' });
+  }
+
+  const cleanName = resource_name.trim();
+  const cleanUrl = geo_url.trim();
+  const cleanSubdomains = geo_subdomains.trim();
+  const cleanMessage = (message || '').trim();
+
+  const description = [
+    `Запрос на добавление гео-ограниченного сайта/сервиса: ${cleanName}`,
+    `URL: ${cleanUrl}`,
+    `Субдомены: ${cleanSubdomains}`,
+    cleanMessage ? '' : null,
+    cleanMessage || null,
+  ].filter(Boolean).join('\n');
+
+  const ticket = db.createTicket({
+    title: cleanName,
+    resource_name: cleanName,
+    description,
+    type: 'feature',
+    priority: 'medium',
+    is_private: is_private ? 1 : 0,
+    author_id: req.user.id,
+    tags: [],
+    emoji: '\uD83C\uDF10',
+    color: '#f59e0b',
+    is_resource_request: true,
+    is_geo_request: true,
+    geo_url: cleanUrl,
+    geo_subdomains: cleanSubdomains,
+  });
+
+  const initialMessage = db.addMessage({
+    ticket_id: ticket.id,
+    author_id: req.user.id,
+    content: cleanMessage || 'Заявка на добавление гео-ограниченного сайта/сервиса',
+  });
+
+  if (req.files && req.files.length > 0) {
+    for (const file of req.files) {
+      db.addAttachment({
+        ticket_id: ticket.id,
+        message_id: initialMessage.id,
+        filename: file.filename,
+        original_name: file.originalname,
+        mime_type: normalizeMimeType(file),
+        size: file.size,
+      });
+    }
+  }
+
+  if (!req.user.is_admin) {
+    const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
+    notifyAdmin(
+      `\uD83C\uDF10 Новый запрос гео-ограничения: <b>${escHtml(cleanName)}</b>\n` +
+      `Автор: ${authorName}\n` +
+      `URL: ${escHtml(cleanUrl)}\n` +
+      `Субдомены: ${escHtml(cleanSubdomains)}`
     );
   }
 
@@ -1332,6 +1433,41 @@ app.post('/api/tags', authMiddleware, adminMiddleware, (req, res) => {
   if (!name) return res.status(400).json({ error: 'Name required' });
   const tag = db.createTag(name, color);
   res.json(tag);
+});
+
+// --- Ticket Types ---
+
+app.get('/api/ticket-types', (req, res) => {
+  res.json(db.getAllTicketTypes());
+});
+
+app.post('/api/ticket-types', authMiddleware, adminMiddleware, (req, res) => {
+  const { key, name, emoji, color, sort_order } = req.body;
+  if (!key || !name) return res.status(400).json({ error: 'Key and name are required' });
+  if (!/^[a-z0-9_]+$/.test(key)) return res.status(400).json({ error: 'Key must be lowercase alphanumeric with underscores' });
+  const existing = db.getTicketTypeByKey(key);
+  if (existing) return res.status(400).json({ error: 'Type with this key already exists' });
+  const type = db.createTicketType({ key, name, emoji: emoji || '', color: color || '#6c757d', sort_order: sort_order || 0 });
+  res.json(type);
+});
+
+app.put('/api/ticket-types/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const id = parseInt(req.params.id);
+  const { key, name, emoji, color, sort_order } = req.body;
+  if (key && !/^[a-z0-9_]+$/.test(key)) return res.status(400).json({ error: 'Key must be lowercase alphanumeric with underscores' });
+  if (key) {
+    const existing = db.getTicketTypeByKey(key);
+    if (existing && existing.id !== id) return res.status(400).json({ error: 'Type with this key already exists' });
+  }
+  const updated = db.updateTicketType(id, { key, name, emoji, color, sort_order });
+  if (!updated) return res.status(404).json({ error: 'Type not found' });
+  res.json(updated);
+});
+
+app.delete('/api/ticket-types/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const id = parseInt(req.params.id);
+  db.deleteTicketType(id);
+  res.json({ ok: true });
 });
 
 // --- Stats ---

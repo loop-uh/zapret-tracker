@@ -430,6 +430,7 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   flex-shrink: 0;
 }
 
+/* Legacy type icon colors (used as fallback if no dynamic color) */
 .ticket-type-icon.bug { background: linear-gradient(135deg, #d92948, #e8364d); }
 .ticket-type-icon.idea { background: linear-gradient(135deg, #0074e8, #4da3ff); }
 .ticket-type-icon.feature { background: linear-gradient(135deg, #16a34a, #22c55e); }
@@ -1253,6 +1254,170 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   margin-bottom: 18px;
 }
 
+/* ========== Request Type Chooser ========== */
+.request-type-chooser {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 12px 0;
+}
+
+.request-type-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.request-type-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.request-type-card:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+}
+
+.request-type-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.request-type-card h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.request-type-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.request-type-example {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  line-height: 1.5;
+}
+
+.request-type-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  align-self: flex-start;
+}
+
+/* ========== Info Boxes ========== */
+.info-box {
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.info-box-blue {
+  background: rgba(77, 163, 255, .08);
+  border: 1px solid rgba(77, 163, 255, .2);
+  color: #93c5fd;
+}
+
+.info-box-amber {
+  background: rgba(245, 158, 11, .08);
+  border: 1px solid rgba(245, 158, 11, .2);
+  color: #fcd34d;
+}
+
+/* ========== About View ========== */
+.about-view {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.about-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.about-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.about-header p {
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.about-links {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.about-link-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 22px;
+  text-decoration: none;
+  color: var(--text);
+  transition: var(--transition);
+}
+
+.about-link-card:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-glow);
+  text-decoration: none;
+  color: var(--text);
+}
+
+.about-link-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.about-link-info h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.about-link-info p {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 /* ========== Online Badge in Nav ========== */
 .online-badge {
   display: inline-flex;
@@ -1791,6 +1956,123 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   .settings-section { padding: 16px; }
 }
 
+/* ========== Type Badge ========== */
+.type-badge {
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ========== Admin Panel ========== */
+.admin-view {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.admin-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-top: 18px;
+}
+
+.admin-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.admin-section-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.admin-types-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-type-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: var(--transition);
+}
+
+.admin-type-row:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+}
+
+.admin-type-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-type-emoji {
+  font-size: 22px;
+  flex-shrink: 0;
+  width: 32px;
+  text-align: center;
+}
+
+.admin-type-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.admin-type-key {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.admin-type-color-preview {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+}
+
+.admin-type-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.admin-nav-btn {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.admin-nav-btn.active {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, .1);
+  border-color: rgba(139, 92, 246, .25);
+}
+
 /* ========== Hamburger Menu ========== */
 .hamburger-btn {
   display: none;
@@ -1882,6 +2164,7 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   }
 
   .resource-view-tabs { flex-direction: column; }
+  .request-type-cards { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {

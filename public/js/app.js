@@ -9,6 +9,7 @@ const App = {
   user: null,
   currentView: 'list',
   tags: [],
+  ticketTypes: [],
   config: {},
   authPollInterval: null,
   // Presence tracking
@@ -27,6 +28,7 @@ const App = {
 
     await this.loadConfig();
     await this.loadTags();
+    await this.loadTicketTypes();
 
     // Try WebApp auth first (instant, no polling)
     if (isTgWebApp && !this.token) {
@@ -80,6 +82,32 @@ const App = {
       const res = await fetch('/api/tags');
       this.tags = await res.json();
     } catch {}
+  },
+
+  async loadTicketTypes() {
+    try {
+      const res = await fetch('/api/ticket-types');
+      this.ticketTypes = await res.json();
+    } catch {}
+  },
+
+  // Helper: get type labels/emoji map from loaded ticketTypes
+  getTypeLabels() {
+    const labels = {};
+    for (const t of this.ticketTypes) labels[t.key] = t.name;
+    return labels;
+  },
+
+  getTypeEmojis() {
+    const emojis = {};
+    for (const t of this.ticketTypes) emojis[t.key] = t.emoji;
+    return emojis;
+  },
+
+  getTypeColors() {
+    const colors = {};
+    for (const t of this.ticketTypes) colors[t.key] = t.color;
+    return colors;
   },
 
   // ========== API Helper ==========
@@ -364,6 +392,16 @@ const App = {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
               Настройки
             </button>
+            <button class="nav-btn ${this.currentView === 'about' ? 'active' : ''}" data-nav="about">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              О проекте
+            </button>
+            ${this.user.is_admin ? `
+            <button class="nav-btn admin-nav-btn ${this.currentView === 'admin' ? 'active' : ''}" data-nav="admin">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              Админ-панель
+            </button>
+            ` : ''}
             <div class="mobile-nav-extra">
               <button class="btn btn-primary" data-mobile-action="new-ticket" style="width:100%">+ Новый тикет</button>
               <div class="user-info" style="padding:8px 0">
@@ -481,6 +519,8 @@ const App = {
       case 'online': this.renderOnlineView(content); break;
       case 'users': this.renderUsersView(content); break;
       case 'settings': this.renderSettingsView(content); break;
+      case 'about': this.renderAboutView(content); break;
+      case 'admin': this.renderAdminView(content); break;
       case 'ticket': this.renderTicketView(content, data); break;
       default: this.renderListView(content);
     }
@@ -565,10 +605,7 @@ const App = {
         <input class="search-input" type="text" placeholder="Поиск тикетов..." id="search-input" value="${esc(saved.search || '')}">
         <select class="filter-select" id="filter-type">
           <option value="">Все типы</option>
-          <option value="bug" ${sel('bug', saved.type)}>Баги</option>
-          <option value="idea" ${sel('idea', saved.type)}>Идеи</option>
-          <option value="feature" ${sel('feature', saved.type)}>Фичи</option>
-          <option value="improvement" ${sel('improvement', saved.type)}>Улучшения</option>
+          ${this.ticketTypes.map(tt => `<option value="${tt.key}" ${sel(tt.key, saved.type)}>${tt.emoji ? tt.emoji + ' ' : ''}${esc(tt.name)}</option>`).join('')}
         </select>
         <select class="filter-select" id="filter-status">
           <option value="">Все статусы</option>
@@ -721,9 +758,11 @@ const App = {
     if (!tickets.length) return this.renderTicketList(tickets);
 
     const groups = {};
+    const typeGroupLabels = {};
+    for (const tt of this.ticketTypes) typeGroupLabels[tt.key] = (tt.emoji ? tt.emoji + ' ' : '') + tt.name;
     const groupLabels = {
       status: { open: 'Открыто', in_progress: 'В работе', review: 'На ревью', testing: 'Тестирование', closed: 'Закрыто', rejected: 'Отклонено', duplicate: 'Дубликат' },
-      type: { bug: 'Баги', idea: 'Идеи', feature: 'Фичи', improvement: 'Улучшения' },
+      type: typeGroupLabels,
       priority: { critical: 'Критический', high: 'Высокий', medium: 'Средний', low: 'Низкий' },
     };
     const labels = groupLabels[groupBy] || {};
@@ -762,11 +801,15 @@ const App = {
     }
 
     return tickets.map(t => {
-      const icon = ticketIcon(t);
+      const icon = ticketIcon(t, false, this.ticketTypes);
       const colorStyle = t.color ? `border-left: 3px solid ${t.color};` : '';
       const tagsHtml = (t.tags || []).map(tag =>
         `<span class="tag" style="color:${tag.color};border-color:${tag.color}40;background:${tag.color}15">${esc(tag.name)}</span>`
       ).join('');
+      const typeInfo = this.ticketTypes.find(tt => tt.key === t.type);
+      const typeBadgeHtml = typeInfo
+        ? `<span class="type-badge" style="color:${typeInfo.color};border-color:${typeInfo.color}40;background:${typeInfo.color}15">${typeInfo.emoji ? typeInfo.emoji + ' ' : ''}${esc(typeInfo.name)}</span>`
+        : `<span class="type-badge">${esc(t.type)}</span>`;
 
       return `
         <div class="ticket-row" data-id="${t.id}" style="${colorStyle}">
@@ -775,6 +818,7 @@ const App = {
             <div class="ticket-title-row">
               <span class="ticket-id">#${t.id}</span>
               <span class="ticket-title">${esc(t.title)}</span>
+              ${typeBadgeHtml}
               <span class="ticket-tags">${tagsHtml}</span>
             </div>
             <div class="ticket-meta">
@@ -871,7 +915,7 @@ const App = {
   },
 
   renderKanbanCard(t) {
-    const iconSmall = ticketIcon(t, true);
+    const iconSmall = ticketIcon(t, true, this.ticketTypes);
     const colorStyle = t.color ? `border-left: 3px solid ${t.color};` : '';
     const tagsHtml = (t.tags || []).slice(0, 3).map(tag =>
       `<span class="tag" style="color:${tag.color};border-color:${tag.color}40;background:${tag.color}15">${esc(tag.name)}</span>`
@@ -910,7 +954,7 @@ const App = {
         <div class="resource-view">
           <div class="resource-view-tabs">
             <button class="view-tab active" data-rr-tab="list">Все запросы (${rrData.total})</button>
-            <button class="view-tab" data-rr-tab="form">+ Новый запрос</button>
+            <button class="view-tab" data-rr-tab="choose">+ Новый запрос</button>
           </div>
 
           <div id="rr-tab-list" class="rr-tab-content">
@@ -929,13 +973,48 @@ const App = {
             </div>
           </div>
 
+          <!-- Type selection step -->
+          <div id="rr-tab-choose" class="rr-tab-content" style="display:none">
+            <div class="request-type-chooser">
+              <h2 style="font-size:20px;margin-bottom:6px;text-align:center">Какой тип запроса вы хотите создать?</h2>
+              <p style="color:var(--text-muted);text-align:center;margin-bottom:24px;font-size:14px;line-height:1.6">
+                Выберите тип в зависимости от причины, по которой сайт или сервис недоступен из России.
+              </p>
+              <div class="request-type-cards">
+                <div class="request-type-card" id="choose-category">
+                  <div class="request-type-icon" style="background:rgba(77,163,255,.15);color:#4da3ff">&#128230;</div>
+                  <h3>Категория для Zapret GUI</h3>
+                  <p class="request-type-desc">Сайт/игра <strong>заблокированы Роскомнадзором</strong> (DPI-блокировка). Для обхода нужны файлы ipset/hostlist, протокол и порты.</p>
+                  <div class="request-type-example">
+                    <span style="font-weight:600">Примеры:</span> Discord, YouTube, Instagram, игры заблокированные в РФ
+                  </div>
+                  <div class="request-type-tag" style="background:rgba(77,163,255,.15);color:#4da3ff">Блокировка РКН</div>
+                </div>
+                <div class="request-type-card" id="choose-geo">
+                  <div class="request-type-icon" style="background:rgba(245,158,11,.15);color:#f59e0b">&#127760;</div>
+                  <h3>Гео-ограничение</h3>
+                  <p class="request-type-desc"><strong>Сам сайт или сервис блокирует</strong> доступ для пользователей из России (санкции, гео-блокировка со стороны сервиса). РКН тут ни при чём.</p>
+                  <div class="request-type-example">
+                    <span style="font-weight:600">Примеры:</span> ChatGPT, Notion, Figma, Adobe, сервисы ушедшие из РФ
+                  </div>
+                  <div class="request-type-tag" style="background:rgba(245,158,11,.15);color:#f59e0b">Гео-блокировка</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Category form (existing) -->
           <div id="rr-tab-form" class="rr-tab-content" style="display:none">
             <div class="ticket-detail" style="max-width:820px;margin:0">
               <div class="ticket-content">
-                <h2 style="font-size:22px;margin-bottom:8px">Добавление своего сайта/игры (НЕ ИИ СЕРВИСЫ ИЛИ ТЕ СЕРВИСЫ КОТОРЫЕ БЫЛИ ЗАБЛОКИРОВАНЫ ДЛЯ РФ ПОЛЬЗОВАТЕЛЕЙ ИЗ-ЗА САНЦИЙ!)</h2>
-                <p style="color:var(--text-muted);margin-bottom:16px">
-                  Для корректной обработки заявки обязательно укажите протокол, порты и прикрепите файлы (ipset/hostlist).
+                <button class="btn" id="rr-back-to-choose" style="margin-bottom:16px">&larr; Назад к выбору типа</button>
+                <h2 style="font-size:22px;margin-bottom:8px">Добавление категории для Zapret GUI</h2>
+                <p style="color:var(--text-muted);margin-bottom:4px">
+                  Для сайтов/игр, заблокированных Роскомнадзором (DPI). Обязательно укажите протокол, порты и прикрепите файлы (ipset/hostlist).
                 </p>
+                <div class="info-box info-box-blue" style="margin-bottom:16px">
+                  <strong>Что это?</strong> Сайт заблокирован на уровне провайдера по решению РКН. Для обхода Zapret использует DPI-обход, для чего нужны технические данные: протокол, порты и файлы с доменами/IP.
+                </div>
 
                 <div class="form-group">
                   <a class="btn" href="https://publish.obsidian.md/zapret/Zapret/%D0%A1%D0%BE%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B5+%D1%81%D0%B2%D0%BE%D0%B5%D0%B9+%D0%BA%D0%B0%D1%82%D0%B5%D0%B3%D0%BE%D1%80%D0%B8%D0%B8" target="_blank" rel="noopener noreferrer">
@@ -990,18 +1069,78 @@ const App = {
               </div>
             </div>
           </div>
+
+          <!-- Geo-restriction form (new) -->
+          <div id="rr-tab-geo" class="rr-tab-content" style="display:none">
+            <div class="ticket-detail" style="max-width:820px;margin:0">
+              <div class="ticket-content">
+                <button class="btn" id="geo-back-to-choose" style="margin-bottom:16px">&larr; Назад к выбору типа</button>
+                <h2 style="font-size:22px;margin-bottom:8px">Добавление сайта с гео-ограничением</h2>
+                <p style="color:var(--text-muted);margin-bottom:4px">
+                  Для сайтов/сервисов, которые сами ограничивают доступ для пользователей из России.
+                </p>
+                <div class="info-box info-box-amber" style="margin-bottom:16px">
+                  <strong>Что это?</strong> Сам сайт или сервис блокирует пользователей из России (из-за санкций или по собственному решению). Провайдер и РКН тут ни при чём &mdash; блокировка происходит на стороне самого сервиса. Для обхода достаточно указать домены/субдомены.
+                </div>
+
+                <div class="form-group">
+                  <label>Название сайта/сервиса *</label>
+                  <input class="form-input" id="geo-name" placeholder="Например: ChatGPT, Adobe, Figma">
+                </div>
+
+                <div class="form-group">
+                  <label>URL сайта/сервиса *</label>
+                  <input class="form-input" id="geo-url" placeholder="Например: https://chat.openai.com">
+                </div>
+
+                <div class="form-group">
+                  <label>Субдомены *</label>
+                  <textarea class="form-textarea" id="geo-subdomains" rows="3" placeholder="Перечислите субдомены через запятую или с новой строки, например:&#10;chat.openai.com&#10;api.openai.com&#10;auth.openai.com"></textarea>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Укажите все домены и субдомены, к которым нужен доступ</div>
+                </div>
+
+                <div class="form-group">
+                  <label>Описание (необязательно)</label>
+                  <textarea class="form-textarea" id="geo-message" placeholder="Дополнительная информация, как именно сервис блокирует доступ, что пробовали..."></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-checkbox">
+                    <input type="checkbox" id="geo-private">
+                    Приватный запрос (видит только админ и вы)
+                  </label>
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:center">
+                  <button class="btn btn-primary" id="geo-submit">Отправить запрос</button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       `;
 
-      // Tab switching
-      document.querySelectorAll('[data-rr-tab]').forEach(tab => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('[data-rr-tab]').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          document.getElementById('rr-tab-list').style.display = tab.dataset.rrTab === 'list' ? '' : 'none';
-          document.getElementById('rr-tab-form').style.display = tab.dataset.rrTab === 'form' ? '' : 'none';
+      // Tab switching (list / choose)
+      const showTab = (tabName) => {
+        document.querySelectorAll('[data-rr-tab]').forEach(t => t.classList.remove('active'));
+        document.querySelector(`[data-rr-tab="${tabName}"]`)?.classList.add('active');
+        ['list', 'choose', 'form', 'geo'].forEach(t => {
+          const el = document.getElementById(`rr-tab-${t}`);
+          if (el) el.style.display = t === tabName ? '' : 'none';
         });
+      };
+
+      document.querySelectorAll('[data-rr-tab]').forEach(tab => {
+        tab.addEventListener('click', () => showTab(tab.dataset.rrTab));
       });
+
+      // Type selection cards
+      document.getElementById('choose-category')?.addEventListener('click', () => showTab('form'));
+      document.getElementById('choose-geo')?.addEventListener('click', () => showTab('geo'));
+
+      // Back buttons
+      document.getElementById('rr-back-to-choose')?.addEventListener('click', () => showTab('choose'));
+      document.getElementById('geo-back-to-choose')?.addEventListener('click', () => showTab('choose'));
 
       // Resource request list filtering
       let rrDebounce = null;
@@ -1029,6 +1168,7 @@ const App = {
 
       this.bindTicketList();
       this.bindResourceRequestForm();
+      this.bindGeoRequestForm();
     } catch (e) {
       container.innerHTML = `<div class="empty-state"><h3>Ошибка загрузки</h3><p>${esc(e.message)}</p></div>`;
     }
@@ -1054,7 +1194,8 @@ const App = {
 
     const filesInput = document.getElementById('rr-files');
     filesInput?.addEventListener('change', (e) => {
-      for (const f of e.target.files) rrFiles.push(f);
+      const accepted = filterOversizedFiles(Array.from(e.target.files), (msg, type) => this.toast(msg, type));
+      for (const f of accepted) rrFiles.push(f);
       e.target.value = '';
       renderRrFiles();
     });
@@ -1068,13 +1209,16 @@ const App = {
       e.preventDefault();
       const ts = Date.now();
       let idx = 0;
+      const pastedFiles = [];
       for (const item of imgs) {
         const blob = item.getAsFile();
         if (!blob) continue;
-        rrFiles.push(makePastedImageFile(blob, ts, idx++));
+        pastedFiles.push(makePastedImageFile(blob, ts, idx++));
       }
+      const accepted = filterOversizedFiles(pastedFiles, (msg, type) => this.toast(msg, type));
+      for (const f of accepted) rrFiles.push(f);
       renderRrFiles();
-      this.toast(`Добавлено изображений: ${imgs.length}`, 'success');
+      if (accepted.length > 0) this.toast(`Добавлено изображений: ${accepted.length}`, 'success');
     });
 
     document.getElementById('rr-submit')?.addEventListener('click', async () => {
@@ -1116,6 +1260,42 @@ const App = {
     });
   },
 
+  bindGeoRequestForm() {
+    document.getElementById('geo-submit')?.addEventListener('click', async () => {
+      const resource_name = document.getElementById('geo-name').value.trim();
+      const geo_url = document.getElementById('geo-url').value.trim();
+      const geo_subdomains = document.getElementById('geo-subdomains').value.trim();
+      const message = document.getElementById('geo-message').value.trim();
+      const is_private = document.getElementById('geo-private').checked;
+
+      if (!resource_name) return this.toast('Укажите название сайта/сервиса', 'error');
+      if (!geo_url) return this.toast('Укажите URL сайта/сервиса', 'error');
+      if (!geo_subdomains) return this.toast('Укажите субдомены', 'error');
+
+      const btn = document.getElementById('geo-submit');
+      btn.disabled = true;
+      btn.textContent = 'Отправка...';
+
+      try {
+        const fd = new FormData();
+        fd.append('resource_name', resource_name);
+        fd.append('geo_url', geo_url);
+        fd.append('geo_subdomains', geo_subdomains);
+        fd.append('message', message);
+        fd.append('is_private', is_private ? '1' : '0');
+
+        const ticket = await this.api('POST', '/api/geo-requests', fd, true);
+        this.toast('Запрос отправлен', 'success');
+        location.hash = `ticket-${ticket.id}`;
+        this.navigate('ticket', { id: ticket.id });
+      } catch (e) {
+        this.toast(e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Отправить запрос';
+      }
+    });
+  },
+
   // ========== Ticket Detail View ==========
   async renderTicketView(container, { id }) {
     container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
@@ -1137,7 +1317,7 @@ const App = {
   },
 
   renderTicketDetail(t) {
-    const typeLabels = { bug: 'Баг', idea: 'Идея', feature: 'Фича', improvement: 'Улучшение' };
+    const typeLabels = this.getTypeLabels();
     const tagsHtml = (t.tags || []).map(tag =>
       `<span class="tag" style="color:${tag.color};border-color:${tag.color}40;background:${tag.color}15">${esc(tag.name)}</span>`
     ).join('');
@@ -1166,14 +1346,14 @@ const App = {
 
         <div class="ticket-header">
           <h1>
-            ${ticketIcon(t)}
+            ${ticketIcon(t, false, this.ticketTypes)}
             <span id="ticket-title-text">${esc(t.title)}</span>
             ${canEdit ? '<button class="btn-icon" id="edit-title-btn" title="Редактировать" style="font-size:14px;margin-left:4px;opacity:.5">&#9998;</button>' : ''}
           </h1>
           <div class="ticket-header-meta">
             <span class="ticket-status status-${t.status}">${statusLabel(t.status)}</span>
             <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
-            <span>${typeLabels[t.type]}</span>
+            <span>${(() => { const ti = this.ticketTypes.find(tt => tt.key === t.type); return ti ? (ti.emoji ? ti.emoji + ' ' : '') + esc(ti.name) : (typeLabels[t.type] || t.type); })()}</span>
             <span>Создан ${timeAgo(t.created_at)}</span>
             <span>от ${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
             <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn">&#9650; ${t.votes_count}</button>
@@ -1273,7 +1453,7 @@ const App = {
             <div class="sidebar-section">
               <h3>Информация</h3>
               <div class="sidebar-field"><label>ID</label><span>#${t.id}</span></div>
-              <div class="sidebar-field"><label>Тип</label><span>${typeLabels[t.type]}</span></div>
+              <div class="sidebar-field"><label>Тип</label><span>${(() => { const ti = this.ticketTypes.find(tt => tt.key === t.type); return ti ? (ti.emoji ? ti.emoji + ' ' : '') + esc(ti.name) : (typeLabels[t.type] || t.type); })()}</span></div>
               <div class="sidebar-field"><label>Автор</label><span>${esc(t.author_first_name || t.author_username)}</span></div>
               <div class="sidebar-field"><label>Создан</label><span>${formatDate(t.created_at)}</span></div>
               <div class="sidebar-field"><label>Обновлён</label><span>${formatDate(t.updated_at)}</span></div>
@@ -1508,7 +1688,8 @@ const App = {
       attachBtn.addEventListener('click', () => fileInput.click());
 
       fileInput.addEventListener('change', (e) => {
-        for (const file of e.target.files) {
+        const accepted = filterOversizedFiles(Array.from(e.target.files), (msg, type) => this.toast(msg, type));
+        for (const file of accepted) {
           selectedFiles.push(file);
         }
         this.renderFilePreview(selectedFiles);
@@ -1524,13 +1705,16 @@ const App = {
         e.preventDefault();
         const ts = Date.now();
         let idx = 0;
+        const pastedFiles = [];
         for (const item of images) {
           const blob = item.getAsFile();
           if (!blob) continue;
-          selectedFiles.push(makePastedImageFile(blob, ts, idx++));
+          pastedFiles.push(makePastedImageFile(blob, ts, idx++));
         }
+        const accepted = filterOversizedFiles(pastedFiles, (msg, type) => this.toast(msg, type));
+        for (const f of accepted) selectedFiles.push(f);
         this.renderFilePreview(selectedFiles);
-        this.toast(`Добавлено изображений: ${images.length}`, 'success');
+        if (accepted.length > 0) this.toast(`Добавлено изображений: ${accepted.length}`, 'success');
       });
 
       // Send message
@@ -2153,6 +2337,10 @@ const App = {
     document.getElementById('settings-avatar-file')?.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      if (file.size > MAX_FILE_SIZE) {
+        this.toast(`Файл превышает лимит 5 МБ: ${file.name} (${formatSize(file.size)})`, 'error');
+        return;
+      }
       const formData = new FormData();
       formData.append('avatar', file);
       try {
@@ -2212,6 +2400,255 @@ const App = {
     });
   },
 
+  // ========== About View ==========
+  renderAboutView(container) {
+    container.innerHTML = `
+      <div class="about-view">
+        <div class="about-header">
+          <div class="logo-icon" style="width:64px;height:64px;font-size:28px;margin:0 auto 16px;border-radius:16px;background:linear-gradient(135deg,#0074e8,#4da3ff);display:flex;align-items:center;justify-content:center;font-weight:800">Z</div>
+          <h1>Zapret GUI</h1>
+          <p>Инструмент для обхода блокировок интернет-ресурсов в России</p>
+        </div>
+        <div class="about-links">
+          <a class="about-link-card" href="https://publish.obsidian.md/zapret" target="_blank" rel="noopener noreferrer">
+            <div class="about-link-icon" style="background:rgba(77,163,255,.15);color:#4da3ff">&#128214;</div>
+            <div class="about-link-info">
+              <h3>Wiki / База знаний</h3>
+              <p>Документация, инструкции по настройке, FAQ и полезные материалы</p>
+            </div>
+          </a>
+          <a class="about-link-card" href="https://t.me/bypassblock" target="_blank" rel="noopener noreferrer">
+            <div class="about-link-icon" style="background:rgba(34,197,94,.15);color:#22c55e">&#128172;</div>
+            <div class="about-link-info">
+              <h3>Telegram-группа</h3>
+              <p>Основная группа для обсуждения, помощи и новостей проекта</p>
+            </div>
+          </a>
+          <a class="about-link-card" href="https://t.me/zapretnetdiscordyoutube" target="_blank" rel="noopener noreferrer">
+            <div class="about-link-icon" style="background:rgba(124,92,224,.15);color:#7c5ce0">&#128229;</div>
+            <div class="about-link-info">
+              <h3>Скачать все версии</h3>
+              <p>Telegram-группа с архивами всех версий Zapret GUI для скачивания</p>
+            </div>
+          </a>
+          <a class="about-link-card" href="https://t.me/vpndiscordyooutube" target="_blank" rel="noopener noreferrer">
+            <div class="about-link-icon" style="background:rgba(245,158,11,.15);color:#f59e0b">&#128274;</div>
+            <div class="about-link-info">
+              <h3>VPN-группа</h3>
+              <p>Telegram-группа, посвящённая VPN-решениям и обходу блокировок</p>
+            </div>
+          </a>
+          <a class="about-link-card" href="https://t.me/zapretvpns_bot" target="_blank" rel="noopener noreferrer">
+            <div class="about-link-icon" style="background:rgba(232,54,77,.15);color:#e8364d">&#129302;</div>
+            <div class="about-link-info">
+              <h3>VPN-бот</h3>
+              <p>Telegram-бот для получения VPN-конфигураций</p>
+            </div>
+          </a>
+        </div>
+      </div>
+    `;
+  },
+
+  // ========== Admin Panel View ==========
+  async renderAdminView(container) {
+    if (!this.user || !this.user.is_admin) {
+      container.innerHTML = '<div class="empty-state"><h3>Доступ запрещён</h3><p>Эта страница доступна только администраторам</p></div>';
+      return;
+    }
+
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    try {
+      await this.loadTicketTypes();
+      const types = this.ticketTypes;
+
+      container.innerHTML = `
+        <div class="admin-view">
+          <div class="online-header">
+            <h2>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              Админ-панель
+            </h2>
+            <p style="color:var(--text-muted);font-size:13px;margin-top:4px">Управление типами тикетов</p>
+          </div>
+
+          <div class="admin-section">
+            <div class="admin-section-header">
+              <h3>Типы тикетов</h3>
+              <button class="btn btn-primary btn-sm" id="admin-add-type-btn">+ Добавить тип</button>
+            </div>
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">У каждого типа есть эмодзи, имя и цвет. Они отображаются в списке тикетов, фильтрах и при создании.</p>
+
+            <div class="admin-types-list" id="admin-types-list">
+              ${types.map(tt => `
+                <div class="admin-type-row" data-type-id="${tt.id}">
+                  <div class="admin-type-preview">
+                    <span class="admin-type-emoji">${esc(tt.emoji)}</span>
+                    <span class="admin-type-name" style="color:${tt.color}">${esc(tt.name)}</span>
+                    <span class="admin-type-key">${esc(tt.key)}</span>
+                  </div>
+                  <div class="admin-type-color-preview" style="background:${tt.color}" title="${tt.color}"></div>
+                  <div class="admin-type-actions">
+                    <button class="btn btn-sm admin-edit-type-btn" data-type-id="${tt.id}">Редактировать</button>
+                    <button class="btn btn-sm btn-danger admin-delete-type-btn" data-type-id="${tt.id}" data-type-key="${tt.key}">Удалить</button>
+                  </div>
+                </div>
+              `).join('')}
+              ${types.length === 0 ? '<div class="empty-state" style="padding:30px"><h3>Нет типов</h3><p>Добавьте первый тип тикета</p></div>' : ''}
+            </div>
+          </div>
+        </div>
+      `;
+
+      this.bindAdminView();
+    } catch (e) {
+      container.innerHTML = '<div class="empty-state"><h3>Ошибка</h3><p>' + esc(e.message) + '</p></div>';
+    }
+  },
+
+  bindAdminView() {
+    // Add type
+    document.getElementById('admin-add-type-btn')?.addEventListener('click', () => {
+      this.showTypeModal(null, async (data) => {
+        try {
+          await this.api('POST', '/api/ticket-types', data);
+          await this.loadTicketTypes();
+          this.toast('Тип добавлен', 'success');
+          this.navigate('admin');
+        } catch (e) { this.toast(e.message, 'error'); }
+      });
+    });
+
+    // Edit type
+    document.querySelectorAll('.admin-edit-type-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = parseInt(btn.dataset.typeId);
+        const typeData = this.ticketTypes.find(t => t.id === id);
+        if (!typeData) return;
+        this.showTypeModal(typeData, async (data) => {
+          try {
+            await this.api('PUT', `/api/ticket-types/${id}`, data);
+            await this.loadTicketTypes();
+            this.toast('Тип обновлён', 'success');
+            this.navigate('admin');
+          } catch (e) { this.toast(e.message, 'error'); }
+        });
+      });
+    });
+
+    // Delete type
+    document.querySelectorAll('.admin-delete-type-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = parseInt(btn.dataset.typeId);
+        const key = btn.dataset.typeKey;
+        if (!confirm(`Удалить тип "${key}"? Тикеты с этим типом сохранятся, но тип не будет отображаться.`)) return;
+        try {
+          await this.api('DELETE', `/api/ticket-types/${id}`);
+          await this.loadTicketTypes();
+          this.toast('Тип удалён', 'success');
+          this.navigate('admin');
+        } catch (e) { this.toast(e.message, 'error'); }
+      });
+    });
+  },
+
+  showTypeModal(existing, callback) {
+    const isEdit = !!existing;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+          <h2>${isEdit ? 'Редактировать тип' : 'Новый тип тикета'}</h2>
+          <button class="btn-icon modal-close" style="font-size:20px">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Ключ (латиница, без пробелов) *</label>
+            <input class="form-input" id="type-key" placeholder="bug, idea, task..." value="${existing ? esc(existing.key) : ''}" ${isEdit ? 'readonly style="opacity:.6"' : ''}>
+          </div>
+          <div class="form-group">
+            <label>Название *</label>
+            <input class="form-input" id="type-name" placeholder="Баг, Идея, Задача..." value="${existing ? esc(existing.name) : ''}">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Эмодзи</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn" id="type-emoji-btn" style="font-size:22px;min-width:44px;min-height:38px" type="button">${existing && existing.emoji ? esc(existing.emoji) : '+'}</button>
+                <input type="hidden" id="type-emoji" value="${existing ? esc(existing.emoji) : ''}">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Цвет</label>
+              <input type="color" id="type-color" value="${existing ? existing.color : '#6c757d'}" style="width:44px;height:38px;border:1px solid var(--border);border-radius:6px;background:var(--bg-tertiary);cursor:pointer;padding:2px">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Порядок сортировки</label>
+            <input class="form-input" type="number" id="type-sort" value="${existing ? existing.sort_order : '0'}" min="0" placeholder="0">
+          </div>
+          <div class="admin-type-preview-box" style="margin-top:12px;padding:12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius);display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;color:var(--text-muted)">Предпросмотр:</span>
+            <span class="type-badge" id="type-preview-badge" style="color:#6c757d;border-color:#6c757d40;background:#6c757d15">${existing ? (existing.emoji ? esc(existing.emoji) + ' ' : '') + esc(existing.name) : 'Тип'}</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn modal-close">Отмена</button>
+          <button class="btn btn-primary" id="type-submit">${isEdit ? 'Сохранить' : 'Создать'}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelectorAll('.modal-close').forEach(b => b.addEventListener('click', () => overlay.remove()));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    // Emoji picker
+    document.getElementById('type-emoji-btn')?.addEventListener('click', () => {
+      this.showEmojiPicker((emoji) => {
+        document.getElementById('type-emoji').value = emoji;
+        document.getElementById('type-emoji-btn').textContent = emoji || '+';
+        updatePreview();
+      });
+    });
+
+    const updatePreview = () => {
+      const name = document.getElementById('type-name')?.value || 'Тип';
+      const emoji = document.getElementById('type-emoji')?.value || '';
+      const color = document.getElementById('type-color')?.value || '#6c757d';
+      const badge = document.getElementById('type-preview-badge');
+      if (badge) {
+        badge.style.color = color;
+        badge.style.borderColor = color + '40';
+        badge.style.background = color + '15';
+        badge.textContent = (emoji ? emoji + ' ' : '') + name;
+      }
+    };
+
+    document.getElementById('type-name')?.addEventListener('input', updatePreview);
+    document.getElementById('type-color')?.addEventListener('input', updatePreview);
+
+    // Submit
+    document.getElementById('type-submit')?.addEventListener('click', () => {
+      const key = document.getElementById('type-key')?.value.trim();
+      const name = document.getElementById('type-name')?.value.trim();
+      const emoji = document.getElementById('type-emoji')?.value || '';
+      const color = document.getElementById('type-color')?.value || '#6c757d';
+      const sort_order = parseInt(document.getElementById('type-sort')?.value) || 0;
+
+      if (!key || !name) {
+        this.toast('Ключ и название обязательны', 'error');
+        return;
+      }
+
+      overlay.remove();
+      callback({ key, name, emoji, color, sort_order });
+    });
+  },
+
   // ========== Create Modal ==========
   showCreateModal() {
     const tagsHtml = this.tags.map(t =>
@@ -2239,10 +2676,7 @@ const App = {
             <div class="form-group">
               <label>Тип *</label>
               <select class="form-select" id="create-type">
-                <option value="bug">Баг</option>
-                <option value="idea">Идея</option>
-                <option value="feature">Фича</option>
-                <option value="improvement">Улучшение</option>
+                ${this.ticketTypes.map((tt, i) => `<option value="${tt.key}" ${i === 0 ? 'selected' : ''}>${tt.emoji ? tt.emoji + ' ' : ''}${esc(tt.name)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -2360,10 +2794,11 @@ const App = {
         });
 
         // Upload files
-        const files = document.getElementById('create-files').files;
-        if (files.length > 0) {
+        const rawFiles = Array.from(document.getElementById('create-files').files);
+        const acceptedFiles = filterOversizedFiles(rawFiles, (msg, type) => this.toast(msg, type));
+        if (acceptedFiles.length > 0) {
           const formData = new FormData();
-          Array.from(files).forEach((file, i) => formData.append('files', file, getAttachmentName(file, i)));
+          acceptedFiles.forEach((file, i) => formData.append('files', file, getAttachmentName(file, i)));
           await this.api('POST', `/api/tickets/${ticket.id}/upload`, formData, true);
         }
 
@@ -2434,17 +2869,26 @@ const App = {
 
 // ========== Utility Functions ==========
 
-function ticketIcon(t, small = false) {
+function ticketIcon(t, small = false, ticketTypes = []) {
   const s = small ? 'width:18px;height:18px;font-size:10px;flex-shrink:0' : '';
+  // If ticket has a custom emoji set, use it
   if (t.emoji) {
     const size = small ? 'font-size:14px' : 'font-size:18px';
     return `<span style="${size};line-height:1;flex-shrink:0" title="${t.type}">${esc(t.emoji)}</span>`;
   }
-  const typeIcons = { bug: 'B', idea: 'I', feature: 'F', improvement: 'U' };
-  if (small) {
-    return `<span class="ticket-type-icon ${t.type}" style="${s}">${typeIcons[t.type]}</span>`;
+  // Try to use emoji from dynamic ticket type
+  const typeInfo = ticketTypes.find(tt => tt.key === t.type);
+  if (typeInfo && typeInfo.emoji) {
+    const size = small ? 'font-size:14px' : 'font-size:18px';
+    return `<span style="${size};line-height:1;flex-shrink:0" title="${esc(typeInfo.name)}">${esc(typeInfo.emoji)}</span>`;
   }
-  return `<div class="ticket-type-icon ${t.type}">${typeIcons[t.type]}</div>`;
+  // Fallback: letter icon with dynamic color
+  const fallbackLetter = typeInfo ? typeInfo.name[0].toUpperCase() : (t.type || '?')[0].toUpperCase();
+  const bgColor = typeInfo ? typeInfo.color : '#6c757d';
+  if (small) {
+    return `<span class="ticket-type-icon" style="${s};background:${bgColor}">${fallbackLetter}</span>`;
+  }
+  return `<div class="ticket-type-icon" style="background:${bgColor}">${fallbackLetter}</div>`;
 }
 
 function esc(str) {
@@ -2488,12 +2932,32 @@ function formatDate(date) {
   });
 }
 
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
 function formatSize(bytes) {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
   let i = 0;
   while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
   return `${bytes.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+/** Filter out files exceeding MAX_FILE_SIZE, show toast for rejected. Returns accepted files. */
+function filterOversizedFiles(files, toastFn) {
+  const accepted = [];
+  const rejected = [];
+  for (const f of files) {
+    if (f.size > MAX_FILE_SIZE) {
+      rejected.push(f);
+    } else {
+      accepted.push(f);
+    }
+  }
+  if (rejected.length > 0) {
+    const names = rejected.map(f => `${f.name || 'file'} (${formatSize(f.size)})`).join(', ');
+    toastFn(`Файлы превышают лимит 5 МБ: ${names}`, 'error');
+  }
+  return accepted;
 }
 
 function getAttachmentName(file, idx = 0) {

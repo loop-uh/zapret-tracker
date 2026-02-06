@@ -149,7 +149,7 @@ server {
     listen 80 default_server;
     server_name _;
 
-    client_max_body_size 50M;
+    client_max_body_size 5M;
 
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
