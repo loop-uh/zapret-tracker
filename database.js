@@ -715,6 +715,25 @@ function getReactionsForMessages(messageIds) {
   return result;
 }
 
+function getReactionsForTicket(ticketId) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT mr.message_id, mr.emoji, mr.user_id, u.first_name, u.username, u.display_name, u.privacy_hidden
+    FROM message_reactions mr
+    JOIN users u ON mr.user_id = u.id
+    JOIN messages m ON mr.message_id = m.id
+    WHERE m.ticket_id = ?
+    ORDER BY mr.created_at ASC
+  `).all(ticketId);
+
+  const result = {};
+  for (const row of rows) {
+    if (!result[row.message_id]) result[row.message_id] = [];
+    result[row.message_id].push(row);
+  }
+  return result;
+}
+
 // ========== Attachments ==========
 
 function addAttachment({ ticket_id, message_id, filename, original_name, mime_type, size }) {
@@ -919,6 +938,7 @@ module.exports = {
   toggleReaction,
   getReactionsForMessage,
   getReactionsForMessages,
+  getReactionsForTicket,
   // Votes
   toggleVote,
   getUserVotes,

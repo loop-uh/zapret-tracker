@@ -528,6 +528,18 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .vote-btn:hover { border-color: var(--accent); color: var(--info); }
 .vote-btn.voted { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
 
+.whale-icon {
+  flex-shrink: 0;
+  transition: transform 0.3s ease;
+}
+.vote-btn:hover .whale-icon {
+  transform: rotate(-15deg) scale(1.15);
+}
+.vote-btn.voted .whale-icon {
+  transform: rotate(-10deg);
+  filter: drop-shadow(0 0 3px var(--accent));
+}
+
 .message-count {
   display: flex;
   align-items: center;

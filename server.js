@@ -1414,6 +1414,26 @@ app.post('/api/messages/:id/reactions', authMiddleware, (req, res) => {
   res.json({ ...result, reactions });
 });
 
+// --- Reactions Poll (live updates) ---
+
+app.get('/api/tickets/:id/reactions/poll', authMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const allReactions = db.getReactionsForTicket(ticketId);
+  // Aggregate per message: { messageId: [{ emoji, count, users, user_reacted }] }
+  const result = {};
+  for (const [msgId, rawList] of Object.entries(allReactions)) {
+    result[msgId] = aggregateReactions(rawList, req.user);
+  }
+
+  res.json({ reactions: result });
+});
+
 // --- File Upload to ticket ---
 
 app.post('/api/tickets/:id/upload', authMiddleware, upload.array('files', 10), (req, res) => {

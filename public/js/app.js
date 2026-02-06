@@ -491,7 +491,7 @@ const App = {
     const content = document.getElementById('content');
     if (!content) return;
 
-    // Cleanup typing poll, message poll, and new-messages badge from previous ticket view
+    // Cleanup typing poll, message poll, reactions poll, and new-messages badge from previous ticket view
     if (this._typingPollInterval) {
       clearInterval(this._typingPollInterval);
       this._typingPollInterval = null;
@@ -499,6 +499,10 @@ const App = {
     if (this._messagePollInterval) {
       clearInterval(this._messagePollInterval);
       this._messagePollInterval = null;
+    }
+    if (this._reactionsPollInterval) {
+      clearInterval(this._reactionsPollInterval);
+      this._reactionsPollInterval = null;
     }
     document.getElementById('new-messages-badge')?.remove();
 
@@ -832,7 +836,7 @@ const App = {
           <span class="ticket-status status-${t.status}">${statusLabel(t.status)}</span>
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
           <button class="vote-btn ${t.user_voted ? 'voted' : ''}" data-vote="${t.id}" onclick="event.stopPropagation()" title="Голосовать за тикет">
-            <svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg>
+            <svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg>
             ${t.votes_count}
           </button>
           <span class="message-count">
@@ -859,7 +863,7 @@ const App = {
         try {
           const res = await this.api('POST', `/api/tickets/${id}/vote`);
           btn.classList.toggle('voted', res.voted);
-          btn.innerHTML = `<svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${res.votes_count}`;
+          btn.innerHTML = `<svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${res.votes_count}`;
         } catch (e) {
           this.toast(e.message, 'error');
         }
@@ -937,7 +941,7 @@ const App = {
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
         </div>
         <div class="kanban-card-footer">
-          <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px" title="Голосовать за тикет"><svg class="dolphin-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${t.votes_count}</span>
+          <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px" title="Голосовать за тикет"><svg class="whale-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${t.votes_count}</span>
           <span class="message-count" style="font-size:11px">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
             ${t.message_count || 0}
@@ -1360,7 +1364,7 @@ const App = {
             <span>${(() => { const ti = this.ticketTypes.find(tt => tt.key === t.type); return ti ? (ti.emoji ? ti.emoji + ' ' : '') + esc(ti.name) : (typeLabels[t.type] || t.type); })()}</span>
             <span>Создан ${timeAgo(t.created_at)}</span>
             <span>от ${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
-            <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn" title="Голосовать за тикет"><svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${t.votes_count}</button>
+            <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn" title="Голосовать за тикет"><svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${t.votes_count}</button>
             ${tagsHtml}
           </div>
         </div>
@@ -1502,7 +1506,7 @@ const App = {
         const res = await this.api('POST', `/api/tickets/${ticket.id}/vote`);
         const btn = document.getElementById('vote-btn');
         btn.classList.toggle('voted', res.voted);
-        btn.innerHTML = `<svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${res.votes_count}`;
+        btn.innerHTML = `<svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${res.votes_count}`;
       } catch (e) { this.toast(e.message, 'error'); }
     });
 
@@ -1680,6 +1684,16 @@ const App = {
             // User is reading history — show a non-intrusive "new messages" badge
             this.showNewMessagesBadge(list);
           }
+        }
+      } catch {}
+    }, 5000);
+
+    // Live reactions polling — update reactions on all visible messages every 5s
+    this._reactionsPollInterval = setInterval(async () => {
+      try {
+        const data = await this.api('GET', `/api/tickets/${ticket.id}/reactions/poll`);
+        if (data.reactions) {
+          this.updateReactionsInDOM(data.reactions);
         }
       } catch {}
     }, 5000);
@@ -2010,6 +2024,28 @@ const App = {
         const msgId = btn.dataset.msgId;
         this.showReactionPicker(msgId, btn);
       });
+    });
+  },
+
+  // Update reactions in the DOM from poll data: { msgId: [{ emoji, count, users, user_reacted }] }
+  updateReactionsInDOM(reactionsMap) {
+    // Update all existing messages with their new reactions
+    document.querySelectorAll('.message[data-msg-id]').forEach(msgEl => {
+      const msgId = msgEl.dataset.msgId;
+      const container = document.getElementById(`msg-reactions-${msgId}`);
+      if (!container) return;
+
+      const reactions = reactionsMap[msgId] || [];
+      const newHtml = this.renderReactions(reactions, msgId);
+      // Only update if changed to avoid flicker
+      if (container.innerHTML !== newHtml) {
+        container.innerHTML = newHtml;
+        // Rebind only new reaction buttons in this container
+        container.querySelectorAll('.reaction-btn').forEach(btn => {
+          btn._bound = false;
+        });
+        this.bindReactionButtons();
+      }
     });
   },
 
