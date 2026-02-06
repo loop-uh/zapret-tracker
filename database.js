@@ -190,6 +190,34 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_pinned_tickets_order ON pinned_tickets(sort_order);
     CREATE INDEX IF NOT EXISTS idx_thread_replies_parent ON thread_replies(parent_message_id);
     CREATE INDEX IF NOT EXISTS idx_thread_replies_ticket ON thread_replies(ticket_id);
+
+    CREATE TABLE IF NOT EXISTS presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT,
+      author_id INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      file_size INTEGER DEFAULT 0,
+      download_count INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (author_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS preset_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      preset_id INTEGER NOT NULL,
+      author_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (preset_id) REFERENCES presets(id) ON DELETE CASCADE,
+      FOREIGN KEY (author_id) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_presets_author ON presets(author_id);
+    CREATE INDEX IF NOT EXISTS idx_preset_comments_preset ON preset_comments(preset_id);
+    CREATE INDEX IF NOT EXISTS idx_preset_comments_author ON preset_comments(author_id);
   `);
 
   // Insert default tags
@@ -1062,6 +1090,145 @@ function getThreadReplyCountsForTicket(ticketId) {
   return result;
 }
 
+// ========== Presets ==========
+
+function createPreset({ title, description, author_id, filename, original_name, file_size }) {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO presets (title, description, author_id, filename, original_name, file_size)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(title, description || '', author_id, filename, original_name, file_size || 0);
+  return getPresetById(result.lastInsertRowid);
+}
+
+function getPresetById(id) {
+  const db = getDb();
+  return db.prepare(`
+    SELECT p.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden,
+           (SELECT COUNT(*) FROM preset_comments pc WHERE pc.preset_id = p.id) as comment_count
+    FROM presets p
+    JOIN users u ON p.author_id = u.id
+    WHERE p.id = ?
+  `).get(id);
+}
+
+function getPresets({ search, author_id, sort, page = 1, limit = 20 }) {
+  const db = getDb();
+  let where = [];
+  let params = [];
+
+  if (search) {
+    where.push('(p.title LIKE ? OR p.description LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  if (author_id) {
+    where.push('p.author_id = ?');
+    params.push(author_id);
+  }
+
+  const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
+  const offset = (page - 1) * limit;
+
+  const total = db.prepare(`SELECT COUNT(*) as count FROM presets p ${whereClause}`).get(...params).count;
+
+  let orderBy;
+  switch (sort) {
+    case 'oldest': orderBy = 'p.created_at ASC'; break;
+    case 'most_downloaded': orderBy = 'p.download_count DESC, p.created_at DESC'; break;
+    case 'most_commented': orderBy = 'comment_count DESC, p.created_at DESC'; break;
+    default: orderBy = 'p.created_at DESC';
+  }
+
+  const presets = db.prepare(`
+    SELECT p.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden,
+           (SELECT COUNT(*) FROM preset_comments pc WHERE pc.preset_id = p.id) as comment_count
+    FROM presets p
+    JOIN users u ON p.author_id = u.id
+    ${whereClause}
+    ORDER BY ${orderBy}
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
+
+  return { presets, total, page, limit };
+}
+
+function updatePreset(id, updates) {
+  const db = getDb();
+  const allowed = ['title', 'description'];
+  const sets = [];
+  const params = [];
+  for (const key of allowed) {
+    if (updates[key] !== undefined) {
+      sets.push(`${key} = ?`);
+      params.push(updates[key]);
+    }
+  }
+  sets.push('updated_at = CURRENT_TIMESTAMP');
+  params.push(id);
+  if (sets.length > 1) {
+    db.prepare(`UPDATE presets SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  }
+  return getPresetById(id);
+}
+
+function deletePreset(id) {
+  const db = getDb();
+  db.prepare('DELETE FROM preset_comments WHERE preset_id = ?').run(id);
+  return db.prepare('DELETE FROM presets WHERE id = ?').run(id);
+}
+
+function incrementPresetDownload(id) {
+  getDb().prepare('UPDATE presets SET download_count = download_count + 1 WHERE id = ?').run(id);
+}
+
+// ========== Preset Comments ==========
+
+function addPresetComment({ preset_id, author_id, content }) {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO preset_comments (preset_id, author_id, content)
+    VALUES (?, ?, ?)
+  `).run(preset_id, author_id, content);
+
+  db.prepare('UPDATE presets SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(preset_id);
+
+  return db.prepare(`
+    SELECT pc.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM preset_comments pc JOIN users u ON pc.author_id = u.id WHERE pc.id = ?
+  `).get(result.lastInsertRowid);
+}
+
+function getPresetComments(presetId) {
+  return getDb().prepare(`
+    SELECT pc.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM preset_comments pc
+    JOIN users u ON pc.author_id = u.id
+    WHERE pc.preset_id = ?
+    ORDER BY pc.created_at ASC
+  `).all(presetId);
+}
+
+function getPresetCommentById(id) {
+  return getDb().prepare(`
+    SELECT pc.*,
+           u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin,
+           u.display_name as author_display_name, u.display_avatar as author_display_avatar, u.privacy_hidden as author_privacy_hidden
+    FROM preset_comments pc JOIN users u ON pc.author_id = u.id WHERE pc.id = ?
+  `).get(id);
+}
+
+function deletePresetComment(id) {
+  getDb().prepare('DELETE FROM preset_comments WHERE id = ?').run(id);
+}
+
 module.exports = {
   init,
   getDb,
@@ -1137,4 +1304,16 @@ module.exports = {
   getThreadReplyById,
   deleteThreadReply,
   getThreadReplyCountsForTicket,
+  // Presets
+  createPreset,
+  getPresetById,
+  getPresets,
+  updatePreset,
+  deletePreset,
+  incrementPresetDownload,
+  // Preset Comments
+  addPresetComment,
+  getPresetComments,
+  getPresetCommentById,
+  deletePresetComment,
 };

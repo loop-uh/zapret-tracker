@@ -4,6 +4,76 @@
 const TG = window.Telegram?.WebApp;
 const isTgWebApp = !!(TG && TG.initData && TG.initData.length > 0);
 
+function getMarkedParseFn() {
+  try {
+    const m = window.marked;
+    const fn = m && (m.parse || m);
+    return (typeof fn === 'function') ? fn : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasPurify() {
+  try {
+    return !!(window.DOMPurify && typeof window.DOMPurify.sanitize === 'function');
+  } catch {
+    return false;
+  }
+}
+
+function tryHoistCommonJsExportsToWindow() {
+  try {
+    const exp = (typeof module !== 'undefined' && module && module.exports) ? module.exports
+      : ((typeof exports !== 'undefined' && exports) ? exports : null);
+    if (exp) {
+      // marked exports an object; DOMPurify exports a function
+      if (!window.marked && (typeof exp === 'object') && (typeof exp.parse === 'function' || typeof exp.marked === 'function')) {
+        window.marked = exp;
+      }
+      if (!window.DOMPurify && (typeof exp === 'function' || typeof exp === 'object')) {
+        window.DOMPurify = exp.default || exp;
+      }
+    }
+  } catch {}
+}
+
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-dyn="${src}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error('load failed')), { once: true });
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now().toString(36);
+    s.async = false;
+    s.dataset.dyn = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('load failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function ensureMarkdownLibsLoaded() {
+  if (getMarkedParseFn() && hasPurify()) return true;
+
+  // Attempt to load local copies if they weren't included in HTML (or were blocked)
+  try {
+    await loadScriptOnce('/js/marked.min.js');
+    tryHoistCommonJsExportsToWindow();
+  } catch {}
+
+  try {
+    await loadScriptOnce('/js/purify.min.js');
+    tryHoistCommonJsExportsToWindow();
+    setupPurifyHooks();
+  } catch {}
+
+  return !!(getMarkedParseFn() && hasPurify());
+}
+
 const App = {
   token: localStorage.getItem('token'),
   user: null,
@@ -25,6 +95,9 @@ const App = {
       TG.expand();
       document.body.classList.add('tg-webapp');
     }
+
+    // Ensure markdown libs before any rendering
+    await ensureMarkdownLibsLoaded();
 
     // Diagnostics: if markdown libs are blocked/missing, formatting will look like plain text
     try {
@@ -80,6 +153,12 @@ const App = {
       if (id && this.user) {
         this.currentView = 'ticket';
         this._pendingTicketId = id;
+      }
+    } else if (hash.startsWith('#preset-')) {
+      const id = hash.replace('#preset-', '');
+      if (id && this.user) {
+        this.currentView = 'preset';
+        this._pendingPresetId = id;
       }
     }
   },
@@ -390,6 +469,10 @@ const App = {
             <button class="nav-btn ${this.currentView === 'archive' ? 'active' : ''}" data-nav="archive">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
               Архив
+            </button>
+            <button class="nav-btn ${this.currentView === 'presets' ? 'active' : ''}" data-nav="presets">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              Пресеты
             </button>
             <button class="nav-btn ${this.currentView === 'resource' ? 'active' : ''}" data-nav="resource">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7l8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
@@ -3397,24 +3480,30 @@ function esc(str) {
 
 // ========== Markdown Rendering ==========
 // Configure DOMPurify to add target="_blank" to all links
-if (typeof DOMPurify !== 'undefined') {
-  DOMPurify.addHook('afterSanitizeAttributes', function (node) {
-    if (node.tagName === 'A') {
-      node.setAttribute('target', '_blank');
-      node.setAttribute('rel', 'noopener noreferrer');
-    }
-  });
+function setupPurifyHooks() {
+  if (!hasPurify()) return;
+  if (window.__purifyHooked) return;
+  window.__purifyHooked = true;
+  try {
+    window.DOMPurify.addHook('afterSanitizeAttributes', function (node) {
+      if (node && node.tagName === 'A') {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      }
+    });
+  } catch {}
 }
 
 function renderMarkdown(text) {
   if (!text) return '';
   // Check for the actual parse function
-  var parseFn = (typeof marked !== 'undefined') && (marked.parse || marked);
+  var parseFn = getMarkedParseFn();
   if (typeof parseFn !== 'function') return esc(text);
   try {
     var html = parseFn(text, { breaks: true, gfm: true });
-    if (typeof DOMPurify !== 'undefined') {
-      return DOMPurify.sanitize(html, {
+    if (hasPurify()) {
+      setupPurifyHooks();
+      return window.DOMPurify.sanitize(html, {
         ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
           'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
           'table', 'thead', 'tbody', 'tr', 'th', 'td', 'hr', 'img', 'span', 'div', 'sup', 'sub', 'input'],
