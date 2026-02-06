@@ -70,6 +70,8 @@ app.use(express.static(path.join(__dirname, 'public'), {
 app.use('/uploads', express.static(CONFIG.uploadDir, {
   maxAge: '30d',
   setHeaders(res, filePath) {
+    // Prevent MIME sniffing (helps against content-type tricks)
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     // Ensure correct content-type for images
     const ext = path.extname(filePath).toLowerCase();
     const mimeMap = {
@@ -100,15 +102,142 @@ const upload = multer({
   storage,
   limits: { fileSize: CONFIG.maxFileSize },
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|webp|pdf|doc|docx|txt|zip|rar|7z|log|conf|json|xml|csv|mp4|webm/;
+    const allowed = new Set([
+      'jpeg', 'jpg', 'png', 'gif', 'webp',
+      'pdf', 'doc', 'docx', 'txt',
+      'zip', 'rar', '7z',
+      'log', 'conf', 'json', 'xml', 'csv',
+      'mp4', 'webm',
+    ]);
     const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
-    if (allowed.test(ext)) {
+    if (allowed.has(ext)) {
       cb(null, true);
     } else {
       cb(new Error('File type not allowed'), false);
     }
   },
 });
+
+function safeUnlink(filePath) {
+  try { fs.unlinkSync(filePath); } catch {}
+}
+
+function cleanupMulterFiles(files) {
+  for (const f of (files || [])) {
+    if (f && f.path) safeUnlink(f.path);
+  }
+}
+
+function readAt(fd, pos, len) {
+  const buf = Buffer.alloc(len);
+  const read = fs.readSync(fd, buf, 0, len, pos);
+  return read === len ? buf : buf.slice(0, read);
+}
+
+function validateImageFileByExt(filePath, ext) {
+  const st = fs.statSync(filePath);
+  const size = st.size;
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const e = (ext || '').toLowerCase();
+
+    if (e === '.jpg' || e === '.jpeg') {
+      if (size < 4) return false;
+      const head = readAt(fd, 0, 2);
+      const tail = readAt(fd, Math.max(0, size - 2), 2);
+      return head.length === 2 && tail.length === 2 && head[0] === 0xff && head[1] === 0xd8 && tail[0] === 0xff && tail[1] === 0xd9;
+    }
+
+    if (e === '.gif') {
+      if (size < 7) return false;
+      const head = readAt(fd, 0, 6).toString('ascii');
+      const tail = readAt(fd, size - 1, 1);
+      return (head === 'GIF87a' || head === 'GIF89a') && tail.length === 1 && tail[0] === 0x3b;
+    }
+
+    if (e === '.webp') {
+      if (size < 12) return false;
+      const head = readAt(fd, 0, 12);
+      if (head.length < 12) return false;
+      if (head.toString('ascii', 0, 4) !== 'RIFF') return false;
+      if (head.toString('ascii', 8, 12) !== 'WEBP') return false;
+      const riffSize = head.readUInt32LE(4);
+      // RIFF chunk size excludes the first 8 bytes
+      return size >= riffSize + 8;
+    }
+
+    if (e === '.bmp') {
+      if (size < 14) return false;
+      const head = readAt(fd, 0, 14);
+      if (head.length < 14) return false;
+      if (head.toString('ascii', 0, 2) !== 'BM') return false;
+      const declaredSize = head.readUInt32LE(2);
+      return declaredSize >= 14 && declaredSize <= size;
+    }
+
+    if (e === '.png') {
+      // PNG signature (8 bytes) + IHDR (25 bytes) + IEND (12 bytes)
+      if (size < 45) return false;
+      const sig = readAt(fd, 0, 8);
+      const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      if (sig.length !== 8 || !sig.equals(pngSig)) return false;
+
+      let pos = 8;
+      let chunks = 0;
+      let sawIHDR = false;
+
+      while (pos + 8 <= size) {
+        chunks++;
+        if (chunks > 200000) return false; // sanity guard
+
+        const hdr = readAt(fd, pos, 8);
+        if (hdr.length < 8) return false;
+        const len = hdr.readUInt32BE(0);
+        const type = hdr.toString('ascii', 4, 8);
+        pos += 8;
+
+        // Need len bytes data + 4 bytes CRC
+        if (pos + len + 4 > size) return false;
+
+        if (!sawIHDR) {
+          if (type !== 'IHDR' || len !== 13) return false;
+          sawIHDR = true;
+        }
+
+        if (type === 'IEND') {
+          return len === 0;
+        }
+
+        pos += len + 4;
+      }
+      return false;
+    }
+
+    return false;
+  } finally {
+    try { fs.closeSync(fd); } catch {}
+  }
+}
+
+function classifyAndValidateUpload(file) {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const imageMimeByExt = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+  };
+
+  if (imageMimeByExt[ext]) {
+    const ok = validateImageFileByExt(file.path, ext);
+    if (!ok) return { ok: false, error: 'Invalid image file' };
+    return { ok: true, detectedMimeType: imageMimeByExt[ext] };
+  }
+
+  return { ok: true, detectedMimeType: null };
+}
 
 // ========== Sessions (persistent in SQLite) ==========
 
@@ -910,6 +1039,18 @@ app.delete('/api/tickets/:id', authMiddleware, (req, res) => {
 app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (req, res) => {
   const { resource_name, protocol, ports, message, is_private } = req.body;
 
+  // Validate uploads (especially images) and classify mime types
+  if (req.files && req.files.length > 0) {
+    for (const f of req.files) {
+      const v = classifyAndValidateUpload(f);
+      if (!v.ok) {
+        cleanupMulterFiles(req.files);
+        return res.status(400).json({ error: v.error });
+      }
+      if (v.detectedMimeType) f._detectedMimeType = v.detectedMimeType;
+    }
+  }
+
   if (!resource_name || !resource_name.trim()) {
     return res.status(400).json({ error: 'Название сайта/игры обязательно' });
   }
@@ -1001,6 +1142,18 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
   const ticketId = parseInt(req.params.id);
   const ticket = db.getTicketById(ticketId);
   if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  // Validate uploads (especially images) and classify mime types
+  if (req.files && req.files.length > 0) {
+    for (const f of req.files) {
+      const v = classifyAndValidateUpload(f);
+      if (!v.ok) {
+        cleanupMulterFiles(req.files);
+        return res.status(400).json({ error: v.error });
+      }
+      if (v.detectedMimeType) f._detectedMimeType = v.detectedMimeType;
+    }
+  }
 
   // Access check: private tickets are restricted
   if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
@@ -1105,6 +1258,18 @@ app.delete('/api/messages/:id', authMiddleware, (req, res) => {
 app.post('/api/tickets/:id/upload', authMiddleware, upload.array('files', 10), (req, res) => {
   const ticketId = parseInt(req.params.id);
   const attachments = [];
+
+  // Validate uploads (especially images) and classify mime types
+  if (req.files && req.files.length > 0) {
+    for (const f of req.files) {
+      const v = classifyAndValidateUpload(f);
+      if (!v.ok) {
+        cleanupMulterFiles(req.files);
+        return res.status(400).json({ error: v.error });
+      }
+      if (v.detectedMimeType) f._detectedMimeType = v.detectedMimeType;
+    }
+  }
 
   if (req.files) {
     for (const file of req.files) {
@@ -1242,12 +1407,25 @@ app.get('/api/presence/typing/:ticketId', authMiddleware, (req, res) => {
       if (u.privacy_hidden || u.privacy_hide_online || u.privacy_hide_activity) return false;
       return true;
     })
-    .map(u => ({
-      id: u.id,
-      first_name: u.display_name || u.first_name,
-      username: u.display_name ? null : u.username,
-      photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
-    }));
+    .map(u => {
+      const masked = {
+        id: u.id,
+        first_name: u.display_name || u.first_name,
+        username: u.display_name ? null : u.username,
+        photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
+      };
+      if (isAdmin && (u.display_name || u.display_avatar || u.privacy_hidden || u.privacy_hide_online || u.privacy_hide_activity)) {
+        masked._real_first_name = u.first_name;
+        masked._real_username = u.username;
+        masked._real_photo_url = u.photo_url;
+        masked._display_name = u.display_name || null;
+        masked._display_avatar = u.display_avatar || null;
+        masked._privacy_hidden = !!u.privacy_hidden;
+        masked._privacy_hide_online = !!u.privacy_hide_online;
+        masked._privacy_hide_activity = !!u.privacy_hide_activity;
+      }
+      return masked;
+    });
   res.json({ typing: typers });
 });
 
@@ -1389,6 +1567,21 @@ app.put('/api/settings', authMiddleware, (req, res) => {
 // Upload custom avatar
 app.post('/api/settings/avatar', authMiddleware, upload.single('avatar'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
+
+  const ext = path.extname(req.file.originalname || '').toLowerCase();
+  const allowedAvatar = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
+  if (!allowedAvatar.has(ext)) {
+    safeUnlink(req.file.path);
+    return res.status(400).json({ error: 'Avatar must be an image (png/jpg/gif/webp)' });
+  }
+
+  const v = classifyAndValidateUpload(req.file);
+  if (!v.ok) {
+    safeUnlink(req.file.path);
+    return res.status(400).json({ error: v.error });
+  }
+  if (v.detectedMimeType) req.file._detectedMimeType = v.detectedMimeType;
+
   const url = `/uploads/${req.file.filename}`;
   db.updateUserSettings(req.user.id, { display_avatar: url });
   res.json({ url });
@@ -1434,7 +1627,12 @@ app.get('*', (req, res) => {
 app.use((err, req, res, next) => {
   console.error(err);
   if (err instanceof multer.MulterError) {
+    if (req.file && req.file.path) safeUnlink(req.file.path);
+    if (req.files && req.files.length) cleanupMulterFiles(req.files);
     return res.status(400).json({ error: `Upload error: ${err.message}` });
+  }
+  if (err && String(err.message || '') === 'File type not allowed') {
+    return res.status(400).json({ error: 'File type not allowed' });
   }
   res.status(500).json({ error: 'Internal server error' });
 });
@@ -1481,6 +1679,8 @@ function normalizePorts(input) {
 }
 
 function normalizeMimeType(file) {
+  if (file && file._detectedMimeType) return String(file._detectedMimeType).toLowerCase();
+
   const mt = (file.mimetype || '').toLowerCase();
   if (mt && mt !== 'application/octet-stream') return mt;
 

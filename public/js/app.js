@@ -1731,10 +1731,15 @@ const App = {
     }
 
     const avatars = typers.map(u => {
+      const baseTitle = (u.first_name || u.username || '').trim();
+      const adminTitle = (this.user?.is_admin && u._real_first_name && u._real_first_name !== u.first_name)
+        ? `${baseTitle} (реально: ${u._real_first_name}${u._real_username ? ` @${u._real_username}` : ''})`
+        : baseTitle;
+
       if (u.photo_url) {
-        return `<img src="${u.photo_url}" class="typing-avatar" alt="" title="${esc(u.first_name || u.username || '')}">`;
+        return `<img src="${u.photo_url}" class="typing-avatar" alt="" title="${esc(adminTitle)}">`;
       }
-      return `<div class="typing-avatar-placeholder" title="${esc(u.first_name || u.username || '')}">${(u.first_name || '?')[0].toUpperCase()}</div>`;
+      return `<div class="typing-avatar-placeholder" title="${esc(adminTitle)}">${(u.first_name || '?')[0].toUpperCase()}</div>`;
     }).join('');
 
     const names = typers.map(u => esc(u.first_name || u.username || 'Кто-то'));
@@ -2485,10 +2490,22 @@ function makePastedImageFile(blob, ts, idx) {
 
 function isImageAttachment(att) {
   const mt = (att?.mime_type || '').toLowerCase();
-  if (mt.startsWith('image/')) return true;
+  if (mt) return mt.startsWith('image/');
   const name = (att?.original_name || att?.filename || '').toLowerCase();
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 }
+
+// Broken image previews: fall back to a normal attachment link
+document.addEventListener('error', (e) => {
+  const el = e.target;
+  if (!el || el.tagName !== 'IMG') return;
+  if (!el.classList || !el.classList.contains('attachment-preview')) return;
+  const a = el.closest('a');
+  if (!a) return;
+  const name = el.getAttribute('alt') || 'attachment';
+  a.classList.add('attachment');
+  a.textContent = `\u{1F4CE} ${name}`;
+}, true);
 
 function isValidPortsInput(input) {
   if (!input || !input.trim()) return false;
