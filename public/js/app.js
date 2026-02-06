@@ -26,6 +26,20 @@ const App = {
       document.body.classList.add('tg-webapp');
     }
 
+    // Diagnostics: if markdown libs are blocked/missing, formatting will look like plain text
+    try {
+      const parseFn = (typeof marked !== 'undefined') && (marked.parse || marked);
+      const hasMarked = typeof parseFn === 'function';
+      const hasPurify = (typeof DOMPurify !== 'undefined') && typeof DOMPurify.sanitize === 'function';
+      if (!hasMarked || !hasPurify) {
+        console.warn('Markdown libs missing:', { hasMarked, hasPurify, markedType: typeof marked, purifyType: typeof DOMPurify });
+        if (!window.__mdLibWarned) {
+          window.__mdLibWarned = true;
+          this.toast('Markdown отключен: не загрузились marked/DOMPurify', 'error');
+        }
+      }
+    } catch {}
+
     await this.loadConfig();
     await this.loadTags();
     await this.loadTicketTypes();

@@ -7,20 +7,30 @@
   <link rel="stylesheet" href="/css/style.css">
   <link rel="icon" type="image/x-icon" href="/img/Zapret2.ico">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/js/marked.min.js?v=1"></script>
   <script>
-    // Telegram WebApp JS leaks module/exports globals which breaks UMD detection in libraries
-    var __savedModule = window.module, __savedExports = window.exports;
-    window.module = undefined; window.exports = undefined;
+    // In some Telegram WebView environments UMD libraries export into module.exports.
+    // Capture them to window.* right after loading.
+    (function () {
+      if (window.marked) return;
+      var m = (typeof module !== 'undefined' && module && module.exports) ? module.exports
+        : ((typeof exports !== 'undefined' && exports) ? exports : null);
+      if (m) window.marked = m;
+    })();
   </script>
-  <script src="/js/marked.min.js"></script>
-  <script src="/js/purify.min.js"></script>
+  <script src="/js/purify.min.js?v=1"></script>
   <script>
-    window.module = __savedModule; window.exports = __savedExports;
+    (function () {
+      if (window.DOMPurify) return;
+      var p = (typeof module !== 'undefined' && module && module.exports) ? module.exports
+        : ((typeof exports !== 'undefined' && exports) ? exports : null);
+      if (p) window.DOMPurify = p.default || p;
+    })();
   </script>
 </head>
 <body>
   <div id="app"></div>
   <div class="toast-container" id="toasts"></div>
-  <script src="/js/app.js"></script>
+  <script src="/js/app.js?v=1"></script>
 </body>
 </html>
