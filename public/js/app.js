@@ -932,7 +932,7 @@ const App = {
           <div id="rr-tab-form" class="rr-tab-content" style="display:none">
             <div class="ticket-detail" style="max-width:820px;margin:0">
               <div class="ticket-content">
-                <h2 style="font-size:22px;margin-bottom:8px">Добавление своего сайта/игры</h2>
+                <h2 style="font-size:22px;margin-bottom:8px">Добавление своего сайта/игры (НЕ ИИ СЕРВИСЫ ИЛИ ТЕ СЕРВИСЫ КОТОРЫЕ БЫЛИ ЗАБЛОКИРОВАНЫ ДЛЯ РФ ПОЛЬЗОВАТЕЛЕЙ ИЗ-ЗА САНЦИЙ!)</h2>
                 <p style="color:var(--text-muted);margin-bottom:16px">
                   Для корректной обработки заявки обязательно укажите протокол, порты и прикрепите файлы (ipset/hostlist).
                 </p>
