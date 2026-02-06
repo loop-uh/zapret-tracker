@@ -2553,23 +2553,28 @@ app.delete('/api/presets/:id', authMiddleware, (req, res) => {
 
 // Add comment to preset
 app.post('/api/presets/:id/comments', authMiddleware, (req, res) => {
-  const presetId = parseInt(req.params.id);
-  const preset = db.getPresetById(presetId);
-  if (!preset) return res.status(404).json({ error: 'Preset not found' });
+  try {
+    const presetId = parseInt(req.params.id);
+    const preset = db.getPresetById(presetId);
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
 
-  const { content } = req.body;
-  if (!content || !content.trim()) {
-    return res.status(400).json({ error: 'Content is required' });
+    const { content } = req.body;
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const comment = db.addPresetComment({
+      preset_id: presetId,
+      author_id: req.user.id,
+      content: content.trim(),
+    });
+
+    applyMaskToMessageAuthor(comment, req.user);
+    res.json(comment);
+  } catch (e) {
+    console.error('POST /api/presets/:id/comments error:', e);
+    res.status(500).json({ error: e.message });
   }
-
-  const comment = db.addPresetComment({
-    preset_id: presetId,
-    author_id: req.user.id,
-    content: content.trim(),
-  });
-
-  applyMaskToMessageAuthor(comment, req.user);
-  res.json(comment);
 });
 
 // Delete comment
