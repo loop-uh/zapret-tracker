@@ -2097,6 +2097,116 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// ========== Presets API ==========
+
+// Dedicated multer for preset txt files only
+const presetUpload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.txt') { cb(null, true); } else { cb(new Error('Only .txt files are allowed for presets'), false); }
+  },
+});
+
+app.get('/api/presets', authMiddleware, (req, res) => {
+  try {
+    const { search, author_id, sort, page } = req.query;
+    const result = db.getPresets({ search, author_id: author_id ? parseInt(author_id) : undefined, sort: sort || undefined, page: parseInt(page) || 1 });
+    for (const p of result.presets) { applyMaskToPresetAuthor(p, req.user); }
+    res.json(result);
+  } catch (e) { console.error('GET /api/presets error:', e); res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/presets/:id', authMiddleware, (req, res) => {
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    preset.comments = db.getPresetComments(preset.id);
+    for (const c of preset.comments) { applyMaskToMessageAuthor(c, req.user); }
+    applyMaskToPresetAuthor(preset, req.user);
+    res.json(preset);
+  } catch (e) { console.error('GET /api/presets/:id error:', e); res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/presets/:id/content', authMiddleware, (req, res) => {
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    const filePath = path.join(CONFIG.uploadDir, preset.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
+    const content = fs.readFileSync(filePath, 'utf-8');
+    res.json({ content, filename: preset.original_name });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/presets/:id/download', authMiddleware, (req, res) => {
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    const filePath = path.join(CONFIG.uploadDir, preset.filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
+    db.incrementPresetDownload(preset.id);
+    res.download(filePath, preset.original_name);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/presets', authMiddleware, presetUpload.single('file'), (req, res) => {
+  try {
+    const { title, description } = req.body;
+    if (!title || !title.trim()) { if (req.file) safeUnlink(req.file.path); return res.status(400).json({ error: 'Title is required' }); }
+    if (!req.file) return res.status(400).json({ error: 'A .txt file is required' });
+    const preset = db.createPreset({ title: title.trim(), description: (description || '').trim(), author_id: req.user.id, filename: req.file.filename, original_name: req.file.originalname, file_size: req.file.size });
+    applyMaskToPresetAuthor(preset, req.user);
+    res.json(preset);
+  } catch (e) { if (req.file) safeUnlink(req.file.path); res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/presets/:id', authMiddleware, (req, res) => {
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    if (!req.user.is_admin && preset.author_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    const updated = db.updatePreset(parseInt(req.params.id), req.body);
+    applyMaskToPresetAuthor(updated, req.user);
+    res.json(updated);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/presets/:id', authMiddleware, (req, res) => {
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    if (!req.user.is_admin && preset.author_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    safeUnlink(path.join(CONFIG.uploadDir, preset.filename));
+    db.deletePreset(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/presets/:id/comments', authMiddleware, (req, res) => {
+  try {
+    const presetId = parseInt(req.params.id);
+    const preset = db.getPresetById(presetId);
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Content is required' });
+    const comment = db.addPresetComment({ preset_id: presetId, author_id: req.user.id, content: content.trim() });
+    applyMaskToMessageAuthor(comment, req.user);
+    res.json(comment);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/preset-comments/:id', authMiddleware, (req, res) => {
+  try {
+    const comment = db.getPresetCommentById(parseInt(req.params.id));
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+    if (!req.user.is_admin && comment.author_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    db.deletePresetComment(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // --- SPA Fallback ---
 
 app.get('*', (req, res) => {
@@ -2391,44 +2501,7 @@ function escHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// ========== Presets API ==========
-
-// Dedicated multer for preset txt files only
-const presetUpload = multer({
-  storage,
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB limit for txt files
-  fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ext === '.txt') {
-      cb(null, true);
-    } else {
-      cb(new Error('Only .txt files are allowed for presets'), false);
-    }
-  },
-});
-
-// List presets
-app.get('/api/presets', authMiddleware, (req, res) => {
-  console.log('GET /api/presets hit, user:', req.user?.id);
-  try {
-    const { search, author_id, sort, page } = req.query;
-    const result = db.getPresets({
-      search,
-      author_id: author_id ? parseInt(author_id) : undefined,
-      sort: sort || undefined,
-      page: parseInt(page) || 1,
-    });
-
-    // Apply privacy masking to preset authors
-    for (const p of result.presets) {
-      applyMaskToPresetAuthor(p, req.user);
-    }
-    res.json(result);
-  } catch (e) {
-    console.error('GET /api/presets error:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
+// (Preset routes are registered above, before SPA fallback)
 
 // Get single preset with comments
 app.get('/api/presets/:id', authMiddleware, (req, res) => {
