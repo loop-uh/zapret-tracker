@@ -1363,8 +1363,22 @@ app.put('/api/settings', authMiddleware, (req, res) => {
   if (privacy_hidden !== undefined) updates.privacy_hidden = privacy_hidden ? 1 : 0;
   if (privacy_hide_online !== undefined) updates.privacy_hide_online = privacy_hide_online ? 1 : 0;
   if (privacy_hide_activity !== undefined) updates.privacy_hide_activity = privacy_hide_activity ? 1 : 0;
-  if (display_name !== undefined) updates.display_name = display_name.trim() || null;
-  if (display_avatar !== undefined) updates.display_avatar = display_avatar.trim() || null;
+  if (display_name !== undefined) {
+    const v = String(display_name).replace(/[\r\n\t]/g, ' ').trim();
+    updates.display_name = v ? v.slice(0, 40) : null;
+  }
+  if (display_avatar !== undefined) {
+    const v = String(display_avatar).trim();
+    if (!v) {
+      updates.display_avatar = null;
+    } else if (v === 'hidden') {
+      updates.display_avatar = 'hidden';
+    } else if (v.startsWith('/uploads/') && !/["'<>\s]/.test(v)) {
+      updates.display_avatar = v;
+    } else {
+      return res.status(400).json({ error: 'Invalid avatar value' });
+    }
+  }
   if (notify_own !== undefined) updates.notify_own = notify_own ? 1 : 0;
   if (notify_subscribed !== undefined) updates.notify_subscribed = notify_subscribed ? 1 : 0;
 
@@ -1581,6 +1595,12 @@ function applyMaskToTicketAuthor(ticket, viewer) {
     }
   }
 
+  if (!viewerIsAdmin) {
+    delete ticket.author_display_name;
+    delete ticket.author_display_avatar;
+    delete ticket.author_privacy_hidden;
+  }
+
   // Admin: keep real fields; expose fake fields explicitly
   if (viewerIsAdmin) {
     ticket.author_fake_name = src.display_name || null;
@@ -1614,6 +1634,12 @@ function applyMaskToMessageAuthor(msg, viewer) {
       msg.author_username = masked.username;
       msg.author_photo = masked.photo_url;
     }
+  }
+
+  if (!viewerIsAdmin) {
+    delete msg.author_display_name;
+    delete msg.author_display_avatar;
+    delete msg.author_privacy_hidden;
   }
 
   if (viewerIsAdmin) {

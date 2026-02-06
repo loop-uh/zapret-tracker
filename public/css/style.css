@@ -1636,6 +1636,148 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   color: var(--text-muted);
 }
 
+/* ========== Settings View ========== */
+.settings-view {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.settings-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  margin-bottom: 14px;
+}
+
+.settings-section h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.settings-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.settings-profile-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.settings-avatar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-avatar-preview {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-glow);
+  box-shadow: var(--shadow-glow);
+}
+
+.settings-avatar-placeholder {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0074e8, #4da3ff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 34px;
+  color: white;
+  border: 2px solid var(--border-glow);
+  box-shadow: var(--shadow-glow);
+}
+
+.settings-avatar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(26, 39, 68, .5);
+  background: rgba(0,0,0,.12);
+  cursor: pointer;
+  transition: var(--transition);
+  margin-bottom: 8px;
+}
+
+.settings-toggle:hover {
+  border-color: var(--border-glow);
+  background: rgba(77, 163, 255, .06);
+}
+
+.settings-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.settings-toggle-slider {
+  width: 44px;
+  height: 24px;
+  border-radius: 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.3);
+}
+
+.settings-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6b7fa3, #93a6c6);
+  transition: transform .18s ease, background .18s ease;
+}
+
+.settings-toggle input:checked + .settings-toggle-slider {
+  background: rgba(34, 197, 94, .15);
+  border-color: rgba(34, 197, 94, .35);
+}
+
+.settings-toggle input:checked + .settings-toggle-slider::after {
+  transform: translateX(20px);
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+}
+
+.settings-toggle-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 2px;
+}
+
+@media (max-width: 768px) {
+  .settings-section { padding: 16px; }
+}
+
 /* ========== Hamburger Menu ========== */
 .hamburger-btn {
   display: none;

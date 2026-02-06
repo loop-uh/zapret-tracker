@@ -1204,7 +1204,7 @@ const App = {
             <div class="messages-section">
               <h2>
                 <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
-                Обсуждение (${(t.messages || []).filter(m => !m.is_system).length})
+                Обсуждение (<span id="discussion-count">${(t.messages || []).filter(m => !m.is_system).length}</span>)
                 <span class="reading-indicator" id="reading-indicator" style="display:none"></span>
               </h2>
               <div class="messages-list" id="messages-list">
@@ -1470,11 +1470,21 @@ const App = {
         if (data.messages && data.messages.length > 0) {
           const list = document.getElementById('messages-list');
           if (!list) return;
+          let addedNonSystem = 0;
           for (const msg of data.messages) {
             // Skip if already rendered
             if (document.querySelector(`.message[data-msg-id="${msg.id}"]`)) continue;
             list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
+            if (!msg.is_system) addedNonSystem++;
             if (msg.id > lastMsgId) lastMsgId = msg.id;
+          }
+
+          if (addedNonSystem > 0) {
+            const countEl = document.getElementById('discussion-count');
+            if (countEl) {
+              const cur = parseInt(countEl.textContent) || 0;
+              countEl.textContent = cur + addedNonSystem;
+            }
           }
           this.bindMessageActions(ticket);
           // Auto-scroll if user is near bottom
@@ -1834,9 +1844,11 @@ const App = {
                 ? `<img src="${u.photo_url}" class="online-user-avatar" alt="">`
                 : `<div class="online-user-avatar-placeholder">${(u.first_name || '?')[0].toUpperCase()}</div>`;
 
-              const viewText = u.currentView === 'ticket' && u.currentTicketTitle
-                ? `${viewLabels.ticket}: <span class="online-ticket-link" data-ticket-id="${u.currentTicketId}">#${u.currentTicketId} ${esc(u.currentTicketTitle)}</span>`
-                : esc(viewLabels[u.currentView] || u.currentView);
+              const viewText = !u.currentView
+                ? '<span style="color:var(--text-muted);font-style:italic">Активность скрыта</span>'
+                : (u.currentView === 'ticket' && u.currentTicketTitle
+                  ? `${viewLabels.ticket}: <span class="online-ticket-link" data-ticket-id="${u.currentTicketId}">#${u.currentTicketId} ${esc(u.currentTicketTitle)}</span>`
+                  : esc(viewLabels[u.currentView] || u.currentView));
 
               return `
                 <div class="online-user-card">
@@ -1954,7 +1966,9 @@ const App = {
 
       let locationHtml = '';
       if (onlineInfo) {
-        if (onlineInfo.currentView === 'ticket' && onlineInfo.currentTicketTitle) {
+        if (!onlineInfo.currentView) {
+          locationHtml = `<span class="user-current-location">Активность скрыта</span>`;
+        } else if (onlineInfo.currentView === 'ticket' && onlineInfo.currentTicketTitle) {
           locationHtml = `<span class="user-current-location">${viewLabels.ticket}: #${onlineInfo.currentTicketId} ${esc(onlineInfo.currentTicketTitle)}</span>`;
         } else {
           locationHtml = `<span class="user-current-location">${esc(viewLabels[onlineInfo.currentView] || onlineInfo.currentView)}</span>`;
@@ -2001,7 +2015,7 @@ const App = {
         <div class="settings-view">
           <div class="online-header">
             <h2>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9"/></svg>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               Настройки
             </h2>
           </div>
