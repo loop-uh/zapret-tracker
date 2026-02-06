@@ -26,7 +26,41 @@ db.init();
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Cache-bust version — changes on every server restart to defeat Telegram WebApp cache
+const APP_VERSION = Date.now().toString(36);
+
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders(res, filePath) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  },
+}));
+
+// Serve index.html with cache-busting query params on JS/CSS
+app.get('/', (req, res) => {
+  const html = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zapret Tracker — Баги и Идеи</title>
+  <link rel="stylesheet" href="/css/style.css?v=${APP_VERSION}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡</text></svg>">
+  <script src="https://telegram.org/js/telegram-web-app.js"><\/script>
+</head>
+<body>
+  <div id="app"></div>
+  <div class="toast-container" id="toasts"></div>
+  <script src="/js/app.js?v=${APP_VERSION}"><\/script>
+</body>
+</html>`;
+  res.setHeader('Content-Type', 'text/html');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.send(html);
+});
 app.use('/uploads', express.static(CONFIG.uploadDir, {
   maxAge: '30d',
   setHeaders(res, filePath) {
