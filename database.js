@@ -533,6 +533,26 @@ function getMessages(ticket_id) {
   return messages;
 }
 
+function getMessageById(id) {
+  return getDb().prepare(`
+    SELECT m.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin
+    FROM messages m JOIN users u ON m.author_id = u.id WHERE m.id = ?
+  `).get(id);
+}
+
+function updateMessage(id, content) {
+  const db = getDb();
+  db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content, id);
+  return getMessageById(id);
+}
+
+function deleteMessage(id) {
+  const db = getDb();
+  // Delete attachments linked to this message
+  db.prepare('DELETE FROM attachments WHERE message_id = ?').run(id);
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+}
+
 // ========== Attachments ==========
 
 function addAttachment({ ticket_id, message_id, filename, original_name, mime_type, size }) {
@@ -644,6 +664,9 @@ module.exports = {
   // Messages
   addMessage,
   getMessages,
+  getMessageById,
+  updateMessage,
+  deleteMessage,
   // Attachments
   addAttachment,
   // Votes

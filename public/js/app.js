@@ -1326,6 +1326,7 @@ const App = {
         const list = document.getElementById('messages-list');
         list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
         list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+        this.bindMessageActions(ticket);
         this.toast('Сообщение отправлено', 'success');
       } catch (e) {
         this.toast(e.message, 'error');
@@ -1341,11 +1342,94 @@ const App = {
         document.getElementById('send-message-btn').click();
       }
     });
+
+    // Message edit/delete actions
+    this.bindMessageActions(ticket);
+  },
+
+  bindMessageActions(ticket) {
+    // Edit message
+    document.querySelectorAll('.msg-edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgId = btn.dataset.msgId;
+        const contentEl = document.getElementById(`msg-content-${msgId}`);
+        if (!contentEl) return;
+
+        const currentText = contentEl.textContent;
+        const textarea = document.createElement('textarea');
+        textarea.className = 'message-edit-textarea';
+        textarea.value = currentText;
+
+        const btnRow = document.createElement('div');
+        btnRow.className = 'message-edit-actions';
+        btnRow.innerHTML = `
+          <button class="btn btn-primary btn-sm msg-save-btn">Сохранить</button>
+          <button class="btn btn-sm msg-cancel-btn">Отмена</button>
+        `;
+
+        contentEl.style.display = 'none';
+        contentEl.parentNode.insertBefore(textarea, contentEl.nextSibling);
+        contentEl.parentNode.insertBefore(btnRow, textarea.nextSibling);
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        const cancel = () => {
+          textarea.remove();
+          btnRow.remove();
+          contentEl.style.display = '';
+        };
+
+        btnRow.querySelector('.msg-cancel-btn').addEventListener('click', cancel);
+
+        textarea.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Escape') cancel();
+          if (ev.key === 'Enter' && ev.ctrlKey) btnRow.querySelector('.msg-save-btn').click();
+        });
+
+        btnRow.querySelector('.msg-save-btn').addEventListener('click', async () => {
+          const newContent = textarea.value.trim();
+          if (!newContent) return;
+          if (newContent === currentText) { cancel(); return; }
+
+          try {
+            const updated = await this.api('PUT', `/api/messages/${msgId}`, { content: newContent });
+            contentEl.textContent = updated.content;
+            cancel();
+            this.toast('Сообщение отредактировано', 'success');
+          } catch (e) {
+            this.toast(e.message, 'error');
+          }
+        });
+      });
+    });
+
+    // Delete message
+    document.querySelectorAll('.msg-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Удалить это сообщение?')) return;
+
+        const msgId = btn.dataset.msgId;
+        try {
+          await this.api('DELETE', `/api/messages/${msgId}`);
+          const msgEl = document.querySelector(`.message[data-msg-id="${msgId}"]`);
+          if (msgEl) {
+            msgEl.style.transition = 'opacity .2s';
+            msgEl.style.opacity = '0';
+            setTimeout(() => msgEl.remove(), 200);
+          }
+          this.toast('Сообщение удалено', 'success');
+        } catch (e) {
+          this.toast(e.message, 'error');
+        }
+      });
+    });
   },
 
   renderMessage(m) {
     if (m.is_system) {
-      return `<div class="message system"><span>${esc(m.content)}</span><span class="message-date" style="margin-left:auto">${timeAgo(m.created_at)}</span></div>`;
+      return `<div class="message system" data-msg-id="${m.id}"><span>${esc(m.content)}</span><span class="message-date" style="margin-left:auto">${timeAgo(m.created_at)}</span></div>`;
     }
 
     const avatarHtml = m.author_photo
@@ -1359,16 +1443,29 @@ const App = {
       return `<a href="/uploads/${a.filename}" target="_blank" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
     }).join('');
 
+    const canManage = this.user && (this.user.is_admin || m.author_id === this.user.id);
+    const actionsHtml = canManage ? `
+      <div class="message-actions">
+        <button class="msg-action-btn msg-edit-btn" data-msg-id="${m.id}" title="Редактировать">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="msg-action-btn msg-delete-btn" data-msg-id="${m.id}" title="Удалить">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+        </button>
+      </div>
+    ` : '';
+
     return `
-      <div class="message">
+      <div class="message" data-msg-id="${m.id}">
         <div class="message-avatar">${avatarHtml}</div>
         <div class="message-body">
           <div class="message-header">
             <span class="message-author">${esc(m.author_first_name || m.author_username || 'Unknown')}</span>
             ${m.author_is_admin ? '<span class="admin-badge">Админ</span>' : ''}
             <span class="message-date">${timeAgo(m.created_at)}</span>
+            ${actionsHtml}
           </div>
-          <div class="message-content">${esc(m.content)}</div>
+          <div class="message-content" id="msg-content-${m.id}">${esc(m.content)}</div>
           ${attachmentsHtml ? `<div class="message-attachments">${attachmentsHtml}</div>` : ''}
         </div>
       </div>

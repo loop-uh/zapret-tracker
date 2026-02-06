@@ -827,6 +827,48 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
   res.json(message);
 });
 
+// --- Edit Message ---
+
+app.put('/api/messages/:id', authMiddleware, (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const message = db.getMessageById(msgId);
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+
+  // Admin can edit any message; author can edit own
+  if (!req.user.is_admin && message.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // System messages cannot be edited
+  if (message.is_system) {
+    return res.status(400).json({ error: 'Cannot edit system messages' });
+  }
+
+  const { content } = req.body;
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: 'Content required' });
+  }
+
+  const updated = db.updateMessage(msgId, content.trim());
+  res.json(updated);
+});
+
+// --- Delete Message ---
+
+app.delete('/api/messages/:id', authMiddleware, (req, res) => {
+  const msgId = parseInt(req.params.id);
+  const message = db.getMessageById(msgId);
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+
+  // Admin can delete any message; author can delete own
+  if (!req.user.is_admin && message.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  db.deleteMessage(msgId);
+  res.json({ ok: true });
+});
+
 // --- File Upload to ticket ---
 
 app.post('/api/tickets/:id/upload', authMiddleware, upload.array('files', 10), (req, res) => {

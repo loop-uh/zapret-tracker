@@ -819,6 +819,67 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   border: 1px solid var(--border);
 }
 
+/* ========== Message Actions ========== */
+.message-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity .15s;
+}
+
+.message:hover .message-actions { opacity: 1; }
+
+.msg-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+  padding: 0;
+}
+
+.msg-action-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.msg-delete-btn:hover {
+  color: var(--danger);
+  border-color: rgba(232, 54, 77, .3);
+  background: rgba(232, 54, 77, .08);
+}
+
+.message-edit-textarea {
+  width: 100%;
+  min-height: 60px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: var(--font);
+  resize: vertical;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  margin-top: 4px;
+}
+
+.message-edit-textarea:focus { outline: none; }
+
+.message-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 /* ========== Message Form ========== */
 .message-form {
   background: var(--bg-card);
