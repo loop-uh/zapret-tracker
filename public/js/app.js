@@ -836,7 +836,7 @@ const App = {
           <span class="ticket-status status-${t.status}">${statusLabel(t.status)}</span>
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
           <button class="vote-btn ${t.user_voted ? 'voted' : ''}" data-vote="${t.id}" onclick="event.stopPropagation()" title="Голосовать за тикет">
-            <svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg>
+            <span class="whale-emoji">🐳</span>
             ${t.votes_count}
           </button>
           <span class="message-count">
@@ -863,7 +863,7 @@ const App = {
         try {
           const res = await this.api('POST', `/api/tickets/${id}/vote`);
           btn.classList.toggle('voted', res.voted);
-          btn.innerHTML = `<svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${res.votes_count}`;
+          btn.innerHTML = `<span class="whale-emoji">🐳</span> ${res.votes_count}`;
         } catch (e) {
           this.toast(e.message, 'error');
         }
@@ -941,7 +941,7 @@ const App = {
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
         </div>
         <div class="kanban-card-footer">
-          <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px" title="Голосовать за тикет"><svg class="whale-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${t.votes_count}</span>
+          <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px" title="Голосовать за тикет"><span class="whale-emoji">🐳</span> ${t.votes_count}</span>
           <span class="message-count" style="font-size:11px">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
             ${t.message_count || 0}
@@ -1364,7 +1364,7 @@ const App = {
             <span>${(() => { const ti = this.ticketTypes.find(tt => tt.key === t.type); return ti ? (ti.emoji ? ti.emoji + ' ' : '') + esc(ti.name) : (typeLabels[t.type] || t.type); })()}</span>
             <span>Создан ${timeAgo(t.created_at)}</span>
             <span>от ${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
-            <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn" title="Голосовать за тикет"><svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${t.votes_count}</button>
+            <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn" title="Голосовать за тикет"><span class="whale-emoji">🐳</span> ${t.votes_count}</button>
             ${tagsHtml}
           </div>
         </div>
@@ -1506,7 +1506,7 @@ const App = {
         const res = await this.api('POST', `/api/tickets/${ticket.id}/vote`);
         const btn = document.getElementById('vote-btn');
         btn.classList.toggle('voted', res.voted);
-        btn.innerHTML = `<svg class="whale-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2 13c0-4 2.5-7 6-8.5C9 4 10.5 3.5 12 3.5c2 0 3.5.5 5 1.5 2 1.5 3.5 3.5 4 6 .3 1.5 0 3-1 4.5-.8 1-2 2-3.5 2.5l1 2.5h-2l-1-2.5c-1 .3-2 .5-3 .5-1.5 0-3-.3-4.5-1C4.5 16 3 14.8 2 13zm8-4.5c0 .6-.4 1-1 1s-1-.4-1-1 .4-1 1-1 1 .4 1 1z"/><path d="M1 11c0-.5.5-1.5 1-2 .3.8.6 1.5 1 2-.4.6-.7 1.2-1 2-.5-.7-1-1.5-1-2z" opacity=".6"/></svg> ${res.votes_count}`;
+        btn.innerHTML = `<span class="whale-emoji">🐳</span> ${res.votes_count}`;
       } catch (e) { this.toast(e.message, 'error'); }
     });
 
@@ -1942,7 +1942,7 @@ const App = {
   },
 
   // ========== Reactions ==========
-  _reactionEmojis: ['\uD83D\uDC4D', '\uD83D\uDC4E', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F', '\uD83D\uDD25', '\uD83C\uDF89', '\uD83E\uDD14'],
+  _reactionEmojis: ['\uD83D\uDC4D', '\uD83D\uDC4E', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F', '\uD83D\uDD25', '\uD83C\uDF89', '\uD83E\uDD14', '\uD83D\uDCA9', '\uD83E\uDD21'],
 
   renderReactions(reactions, msgId) {
     if (!reactions || reactions.length === 0) return '';
