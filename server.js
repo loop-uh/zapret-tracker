@@ -2579,15 +2579,20 @@ app.post('/api/presets/:id/comments', authMiddleware, (req, res) => {
 
 // Delete comment
 app.delete('/api/preset-comments/:id', authMiddleware, (req, res) => {
-  const comment = db.getPresetCommentById(parseInt(req.params.id));
-  if (!comment) return res.status(404).json({ error: 'Comment not found' });
+  try {
+    const comment = db.getPresetCommentById(parseInt(req.params.id));
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
 
-  if (!req.user.is_admin && comment.author_id !== req.user.id) {
-    return res.status(403).json({ error: 'Access denied' });
+    if (!req.user.is_admin && comment.author_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    db.deletePresetComment(parseInt(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/preset-comments/:id error:', e);
+    res.status(500).json({ error: e.message });
   }
-
-  db.deletePresetComment(parseInt(req.params.id));
-  res.json({ ok: true });
 });
 
 // Helper: apply privacy mask to preset author (same pattern as ticket author)
