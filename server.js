@@ -687,7 +687,7 @@ app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (r
   const { resource_name, protocol, ports, message, is_private } = req.body;
 
   if (!resource_name || !resource_name.trim()) {
-    return res.status(400).json({ error: 'Название ресурса обязательно' });
+    return res.status(400).json({ error: 'Название сайта/игры обязательно' });
   }
 
   const normalizedProtocol = normalizeProtocol(protocol);
@@ -710,7 +710,7 @@ app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (r
   const cleanMessage = (message || '').trim();
 
   const description = [
-    `Запрос на добавление ресурса: ${cleanResourceName}`,
+    `Запрос на добавление сайта/игры: ${cleanResourceName}`,
     `Протокол: ${normalizedProtocol.toUpperCase()}`,
     `Порты: ${cleanPorts}`,
     cleanMessage ? '' : null,
@@ -736,7 +736,7 @@ app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (r
   const initialMessage = db.addMessage({
     ticket_id: ticket.id,
     author_id: req.user.id,
-    content: cleanMessage || 'Заявка на добавление ресурса',
+    content: cleanMessage || 'Заявка на добавление сайта/игры',
   });
 
   for (const file of req.files) {
@@ -753,7 +753,7 @@ app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (r
   if (!req.user.is_admin) {
     const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
     notifyAdmin(
-      `📦 Новый запрос ресурса: <b>${escHtml(cleanResourceName)}</b>\n` +
+      `📦 Новый запрос сайта/игры: <b>${escHtml(cleanResourceName)}</b>\n` +
       `Автор: ${authorName}\n` +
       `Протокол: ${normalizedProtocol.toUpperCase()}\n` +
       `Порты: ${escHtml(cleanPorts)}\n` +

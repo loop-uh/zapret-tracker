@@ -775,7 +775,7 @@ const App = {
 
           <div id="rr-tab-list" class="rr-tab-content">
             <div class="toolbar" style="margin-bottom:12px">
-              <input class="search-input" type="text" placeholder="Поиск ресурсов..." id="rr-search-input">
+              <input class="search-input" type="text" placeholder="Поиск сайтов/игр..." id="rr-search-input">
               <select class="filter-select" id="rr-filter-status">
                 <option value="">Все статусы</option>
                 <option value="open">Открыто</option>
@@ -792,7 +792,7 @@ const App = {
           <div id="rr-tab-form" class="rr-tab-content" style="display:none">
             <div class="ticket-detail" style="max-width:820px;margin:0">
               <div class="ticket-content">
-                <h2 style="font-size:22px;margin-bottom:8px">Новый запрос ресурса</h2>
+                <h2 style="font-size:22px;margin-bottom:8px">Добавление своего сайта/игры</h2>
                 <p style="color:var(--text-muted);margin-bottom:16px">
                   Для корректной обработки заявки обязательно укажите протокол, порты и прикрепите файлы (ipset/hostlist).
                 </p>
@@ -804,7 +804,7 @@ const App = {
                 </div>
 
                 <div class="form-group">
-                  <label>Название ресурса *</label>
+                  <label>Название сайта/игры *</label>
                   <input class="form-input" id="rr-name" placeholder="Например: Roblox">
                 </div>
 
@@ -944,7 +944,7 @@ const App = {
       const message = document.getElementById('rr-message').value.trim();
       const is_private = document.getElementById('rr-private').checked;
 
-      if (!resource_name) return this.toast('Укажите название ресурса', 'error');
+      if (!resource_name) return this.toast('Укажите название сайта/игры', 'error');
       if (!protocol) return this.toast('Укажите протокол', 'error');
       if (!isValidPortsInput(ports)) return this.toast('Неверный формат портов', 'error');
       if (rrFiles.length === 0) return this.toast('Нужно прикрепить хотя бы один файл', 'error');
