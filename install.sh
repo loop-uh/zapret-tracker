@@ -167,7 +167,9 @@ server {
     }
 
     location /uploads/ {
-        alias /opt/zapret-tracker/uploads/;
+        proxy_pass http://127.0.0.1:3000/uploads/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
         expires 30d;
         add_header Cache-Control "public";
     }

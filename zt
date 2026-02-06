@@ -154,6 +154,49 @@ case "${1}" in
     fi
     ;;
 
+  fix-nginx|fix)
+    if [ "$EUID" -ne 0 ]; then echo -e "${RED}sudo zt fix-nginx${NC}"; exit 1; fi
+    NGINX_CONF="/etc/nginx/sites-available/zapret-tracker"
+    if [ ! -f "$NGINX_CONF" ]; then
+      echo -e "${RED}Nginx конфиг не найден${NC}"
+      exit 1
+    fi
+    echo -e "${YELLOW}Фикс nginx /uploads/ (proxy вместо alias)...${NC}"
+    # Replace alias-based uploads with proxy_pass
+    if grep -q "alias /opt/zapret-tracker/uploads/" "$NGINX_CONF"; then
+      # Create backup
+      cp "$NGINX_CONF" "$NGINX_CONF.bak.$(date +%s)"
+      # Use python for reliable multiline replace
+      python3 -c "
+import re
+with open('$NGINX_CONF', 'r') as f:
+    content = f.read()
+# Replace the uploads location block
+old_pattern = r'location /uploads/ \{[^}]*alias /opt/zapret-tracker/uploads/;[^}]*\}'
+new_block = '''location /uploads/ {
+        proxy_pass http://127.0.0.1:3000/uploads/;
+        proxy_set_header Host \\\$host;
+        proxy_set_header X-Real-IP \\\$remote_addr;
+        expires 30d;
+        add_header Cache-Control \"public\";
+    }'''
+content = re.sub(old_pattern, new_block, content, flags=re.DOTALL)
+with open('$NGINX_CONF', 'w') as f:
+    f.write(content)
+print('Done')
+"
+      nginx -t && systemctl reload nginx
+      echo -e "${GREEN}Nginx обновлён! /uploads/ теперь через proxy${NC}"
+    else
+      echo -e "${GREEN}Nginx уже OK (нет alias)${NC}"
+    fi
+    # Also fix permissions
+    mkdir -p "$APP_DIR/uploads"
+    chown -R zapret-tracker:zapret-tracker "$APP_DIR/uploads"
+    chmod 770 "$APP_DIR/uploads"
+    echo -e "${GREEN}Права на uploads/ исправлены${NC}"
+    ;;
+
   domain)
     if [ "$EUID" -ne 0 ]; then echo -e "${RED}sudo zt domain${NC}"; exit 1; fi
     if [ -f "$APP_DIR/setup-domain.sh" ]; then
@@ -175,6 +218,7 @@ case "${1}" in
     echo -e "  ${GREEN}zt logs 50${NC}    Последние 50 строк лога"
     echo -e "  ${GREEN}zt backup${NC}     Бэкап базы данных"
     echo -e "  ${GREEN}zt env${NC}        Редактировать .env и перезапустить"
+    echo -e "  ${GREEN}zt fix-nginx${NC}  Фикс nginx /uploads/ (403 ошибка)"
     echo -e "  ${GREEN}zt domain${NC}     DuckDNS + HTTPS для Telegram Mini App"
     echo ""
     ;;

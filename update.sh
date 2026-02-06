@@ -80,8 +80,34 @@ else
   echo -e "${GREEN}  Зависимости не изменились${NC}"
 fi
 
-# ---- 5. Restart ----
-echo -e "${YELLOW}[5/5] Перезапуск сервиса...${NC}"
+# ---- 5. Fix nginx uploads (proxy instead of alias) ----
+echo -e "${YELLOW}[5/6] Проверка nginx конфигурации...${NC}"
+NGINX_CONF="/etc/nginx/sites-available/zapret-tracker"
+if [ -f "$NGINX_CONF" ] && grep -q "alias /opt/zapret-tracker/uploads/" "$NGINX_CONF"; then
+  echo -e "${YELLOW}  Фикс: /uploads/ через proxy вместо alias...${NC}"
+  # Detect if HTTPS config (has escaped $)
+  if grep -q "ssl_certificate" "$NGINX_CONF"; then
+    sed -i '/location \/uploads\//,/}/ {
+      /alias/c\        proxy_pass http://127.0.0.1:3000/uploads/;\n        proxy_set_header Host \$host;\n        proxy_set_header X-Real-IP \$remote_addr;
+    }' "$NGINX_CONF"
+  else
+    sed -i '/location \/uploads\//,/}/ {
+      /alias/c\        proxy_pass http://127.0.0.1:3000/uploads/;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;
+    }' "$NGINX_CONF"
+  fi
+  nginx -t && systemctl reload nginx
+  echo -e "${GREEN}  Nginx обновлён${NC}"
+else
+  echo -e "${GREEN}  Nginx OK${NC}"
+fi
+
+# Ensure uploads directory permissions
+mkdir -p "$APP_DIR/uploads"
+chown -R "$APP_USER:$APP_USER" "$APP_DIR/uploads"
+chmod 770 "$APP_DIR/uploads"
+
+# ---- 6. Restart ----
+echo -e "${YELLOW}[6/6] Перезапуск сервиса...${NC}"
 systemctl restart zapret-tracker
 
 sleep 2

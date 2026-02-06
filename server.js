@@ -27,7 +27,19 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(CONFIG.uploadDir));
+app.use('/uploads', express.static(CONFIG.uploadDir, {
+  maxAge: '30d',
+  setHeaders(res, filePath) {
+    // Ensure correct content-type for images
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+      '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
+    };
+    if (mimeMap[ext]) res.setHeader('Content-Type', mimeMap[ext]);
+  },
+}));
 
 // ========== File Upload ==========
 
