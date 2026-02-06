@@ -645,8 +645,25 @@ function getOnlineList() {
   }));
 }
 
+function maskOnlineListForPublic(raw) {
+  return raw
+    .filter(u => !(u.privacy_hidden || u.privacy_hide_online))
+    .map(u => ({
+      id: u.id,
+      first_name: u.display_name || u.first_name,
+      username: u.display_name ? null : u.username,
+      photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
+      is_admin: u.is_admin,
+      currentView: u.privacy_hide_activity ? null : u.currentView,
+      currentTicketId: u.privacy_hide_activity ? null : u.currentTicketId,
+      currentTicketTitle: u.privacy_hide_activity ? null : u.currentTicketTitle,
+      lastSeen: u.lastSeen,
+    }));
+}
+
 function broadcastPresence() {
-  const list = getOnlineList();
+  const raw = getOnlineList();
+  const list = maskOnlineListForPublic(raw);
   const data = JSON.stringify({ type: 'presence', users: list, count: list.length });
   for (const client of presenceClients) {
     try {
@@ -1531,8 +1548,8 @@ app.get('/api/presence/stream', authMiddleware, (req, res) => {
 
   presenceClients.add(res);
 
-  // Send current state immediately
-  const list = getOnlineList();
+  // Send current state immediately (masked for privacy)
+  const list = maskOnlineListForPublic(getOnlineList());
   res.write(`data: ${JSON.stringify({ type: 'presence', users: list, count: list.length })}\n\n`);
 
   req.on('close', () => {

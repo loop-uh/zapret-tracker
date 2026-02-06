@@ -348,9 +348,11 @@ const App = {
 
   // ========== Header ==========
   renderHeader() {
-    const avatarHtml = this.user.photo_url
-      ? `<img src="${this.user.photo_url}" class="user-avatar" alt="">`
-      : `<div class="user-avatar-placeholder">${(this.user.first_name || '?')[0].toUpperCase()}</div>`;
+    const effectiveAvatar = this.user.display_avatar === 'hidden' ? null : (this.user.display_avatar || this.user.photo_url);
+    const displayName = this.user.display_name || this.user.first_name;
+    const avatarHtml = effectiveAvatar
+      ? `<img src="${effectiveAvatar}" class="user-avatar" alt="">`
+      : `<div class="user-avatar-placeholder">${(displayName || '?')[0].toUpperCase()}</div>`;
 
     return `
       <div class="header">
@@ -406,7 +408,7 @@ const App = {
               <button class="btn btn-primary" data-mobile-action="new-ticket" style="width:100%">+ Новый тикет</button>
               <div class="user-info" style="padding:8px 0">
                 ${avatarHtml}
-                <span>${esc(this.user.first_name)}</span>
+                <span>${esc(displayName)}</span>
                 ${this.user.is_admin ? '<span class="admin-badge">Админ</span>' : ''}
               </div>
               <button class="btn btn-sm" data-mobile-action="logout" style="width:100%;justify-content:center">Выход</button>
@@ -417,7 +419,7 @@ const App = {
           <button class="btn btn-primary" id="new-ticket-btn">+ Новый тикет</button>
           <div class="user-info">
             ${avatarHtml}
-            <span>${esc(this.user.first_name)}</span>
+            <span>${esc(displayName)}</span>
             ${this.user.is_admin ? '<span class="admin-badge">Админ</span>' : ''}
             ${!this.user.has_chat_id && this.config.hasBotToken ? '<span class="admin-badge" style="background:var(--warning);font-size:10px" title="Напишите боту /start для получения уведомлений">Нет уведомлений</span>' : ''}
           </div>
@@ -829,8 +831,9 @@ const App = {
           </div>
           <span class="ticket-status status-${t.status}">${statusLabel(t.status)}</span>
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
-          <button class="vote-btn ${t.user_voted ? 'voted' : ''}" data-vote="${t.id}" onclick="event.stopPropagation()">
-            &#9650; ${t.votes_count}
+          <button class="vote-btn ${t.user_voted ? 'voted' : ''}" data-vote="${t.id}" onclick="event.stopPropagation()" title="Голосовать за тикет">
+            <svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg>
+            ${t.votes_count}
           </button>
           <span class="message-count">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
@@ -856,7 +859,7 @@ const App = {
         try {
           const res = await this.api('POST', `/api/tickets/${id}/vote`);
           btn.classList.toggle('voted', res.voted);
-          btn.innerHTML = `&#9650; ${res.votes_count}`;
+          btn.innerHTML = `<svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${res.votes_count}`;
         } catch (e) {
           this.toast(e.message, 'error');
         }
@@ -934,7 +937,7 @@ const App = {
           <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
         </div>
         <div class="kanban-card-footer">
-          <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px">&#9650; ${t.votes_count}</span>
+          <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px" title="Голосовать за тикет"><svg class="dolphin-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${t.votes_count}</span>
           <span class="message-count" style="font-size:11px">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
             ${t.message_count || 0}
@@ -1357,7 +1360,7 @@ const App = {
             <span>${(() => { const ti = this.ticketTypes.find(tt => tt.key === t.type); return ti ? (ti.emoji ? ti.emoji + ' ' : '') + esc(ti.name) : (typeLabels[t.type] || t.type); })()}</span>
             <span>Создан ${timeAgo(t.created_at)}</span>
             <span>от ${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
-            <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn">&#9650; ${t.votes_count}</button>
+            <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn" title="Голосовать за тикет"><svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${t.votes_count}</button>
             ${tagsHtml}
           </div>
         </div>
@@ -1499,7 +1502,7 @@ const App = {
         const res = await this.api('POST', `/api/tickets/${ticket.id}/vote`);
         const btn = document.getElementById('vote-btn');
         btn.classList.toggle('voted', res.voted);
-        btn.innerHTML = `&#9650; ${res.votes_count}`;
+        btn.innerHTML = `<svg class="dolphin-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M22 4c-.5.5-1.5 1-3 1-1 0-2.5-.5-3.5-1C14 3 12.5 2 10 2 6 2 3 5 2 9c-.5 2 0 4 1 5.5C4 16 5 17 5 19v3h2v-3c0-1.5.5-3 1.5-4C10 14 12 13 14 13c1 0 2-.5 2.5-1 .5-.5 1-1.5 1-2.5 0-.5 0-1-.5-1.5 1-.5 2-1 3-2 .5-.5 1.5-1 2-2z"/><circle cx="7" cy="8" r="1"/></svg> ${res.votes_count}`;
       } catch (e) { this.toast(e.message, 'error'); }
     });
 
@@ -1766,6 +1769,9 @@ const App = {
   },
 
   bindMessageActions(ticket) {
+    // Bind reactions (always available)
+    this.bindReactionButtons();
+
     // Edit message
     document.querySelectorAll('.msg-edit-btn').forEach(btn => {
       if (btn._bound) return;
@@ -1866,16 +1872,23 @@ const App = {
     }).join('');
 
     const canManage = this.user && (this.user.is_admin || m.author_id === this.user.id);
-    const actionsHtml = canManage ? `
+    const actionsHtml = `
       <div class="message-actions">
+        <button class="msg-action-btn msg-reaction-btn" data-msg-id="${m.id}" title="Реакция">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        </button>
+        ${canManage ? `
         <button class="msg-action-btn msg-edit-btn" data-msg-id="${m.id}" title="Редактировать">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
         <button class="msg-action-btn msg-delete-btn" data-msg-id="${m.id}" title="Удалить">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
         </button>
+        ` : ''}
       </div>
-    ` : '';
+    `;
+
+    const reactionsHtml = this.renderReactions(m.reactions || [], m.id);
 
     return `
       <div class="message" data-msg-id="${m.id}">
@@ -1889,6 +1902,7 @@ const App = {
           </div>
           <div class="message-content" id="msg-content-${m.id}">${esc(m.content)}</div>
           ${attachmentsHtml ? `<div class="message-attachments">${attachmentsHtml}</div>` : ''}
+          <div class="message-reactions" id="msg-reactions-${m.id}">${reactionsHtml}</div>
         </div>
       </div>
     `;
@@ -1909,6 +1923,92 @@ const App = {
       btn.addEventListener('click', () => {
         files.splice(parseInt(btn.dataset.index), 1);
         this.renderFilePreview(files);
+      });
+    });
+  },
+
+  // ========== Reactions ==========
+  _reactionEmojis: ['\uD83D\uDC4D', '\uD83D\uDC4E', '\u2764\uFE0F', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22', '\uD83D\uDE4F', '\uD83D\uDD25', '\uD83C\uDF89', '\uD83E\uDD14'],
+
+  renderReactions(reactions, msgId) {
+    if (!reactions || reactions.length === 0) return '';
+    return reactions.map(r => {
+      const userNames = r.users.map(u => u.name).join(', ');
+      return `<button class="reaction-btn ${r.user_reacted ? 'reacted' : ''}" data-msg-id="${msgId}" data-emoji="${r.emoji}" title="${esc(userNames)}">${r.emoji} <span class="reaction-count">${r.count}</span></button>`;
+    }).join('');
+  },
+
+  showReactionPicker(msgId, anchorEl) {
+    // Remove any existing picker
+    document.querySelector('.reaction-picker')?.remove();
+
+    const picker = document.createElement('div');
+    picker.className = 'reaction-picker';
+    picker.innerHTML = this._reactionEmojis.map(e => `<button class="reaction-picker-btn" data-emoji="${e}">${e}</button>`).join('');
+
+    // Position near the anchor button
+    const rect = anchorEl.getBoundingClientRect();
+    picker.style.position = 'fixed';
+    picker.style.top = (rect.bottom + 4) + 'px';
+    picker.style.left = Math.max(8, rect.left - 80) + 'px';
+    picker.style.zIndex = '500';
+
+    document.body.appendChild(picker);
+
+    // Handle emoji click
+    picker.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.reaction-picker-btn');
+      if (!btn) return;
+      const emoji = btn.dataset.emoji;
+      picker.remove();
+      await this.toggleReaction(msgId, emoji);
+    });
+
+    // Close on click outside
+    const close = (e) => {
+      if (!picker.contains(e.target) && e.target !== anchorEl && !anchorEl.contains(e.target)) {
+        picker.remove();
+        document.removeEventListener('click', close);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  },
+
+  async toggleReaction(msgId, emoji) {
+    try {
+      const res = await this.api('POST', `/api/messages/${msgId}/reactions`, { emoji });
+      // Update reactions in the DOM
+      const container = document.getElementById(`msg-reactions-${msgId}`);
+      if (container) {
+        container.innerHTML = this.renderReactions(res.reactions, msgId);
+        this.bindReactionButtons();
+      }
+    } catch (e) {
+      this.toast(e.message, 'error');
+    }
+  },
+
+  bindReactionButtons() {
+    // Bind reaction toggle (clicking existing reaction)
+    document.querySelectorAll('.reaction-btn').forEach(btn => {
+      if (btn._bound) return;
+      btn._bound = true;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgId = btn.dataset.msgId;
+        const emoji = btn.dataset.emoji;
+        this.toggleReaction(msgId, emoji);
+      });
+    });
+
+    // Bind reaction picker button (smiley icon in message actions)
+    document.querySelectorAll('.msg-reaction-btn').forEach(btn => {
+      if (btn._bound) return;
+      btn._bound = true;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const msgId = btn.dataset.msgId;
+        this.showReactionPicker(msgId, btn);
       });
     });
   },
