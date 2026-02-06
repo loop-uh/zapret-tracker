@@ -662,7 +662,7 @@ app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (r
       message_id: initialMessage.id,
       filename: file.filename,
       original_name: file.originalname,
-      mime_type: file.mimetype,
+      mime_type: normalizeMimeType(file),
       size: file.size,
     });
   }
@@ -722,7 +722,7 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
         message_id: message.id,
         filename: file.filename,
         original_name: file.originalname,
-        mime_type: file.mimetype,
+        mime_type: normalizeMimeType(file),
         size: file.size,
       });
       message.attachments.push(attachment);
@@ -757,7 +757,7 @@ app.post('/api/tickets/:id/upload', authMiddleware, upload.array('files', 10), (
         message_id: null,
         filename: file.filename,
         original_name: file.originalname,
-        mime_type: file.mimetype,
+        mime_type: normalizeMimeType(file),
         size: file.size,
       });
       attachments.push(attachment);
@@ -884,6 +884,29 @@ function normalizePorts(input) {
     .map(s => s.trim())
     .filter(Boolean)
     .join(',');
+}
+
+function normalizeMimeType(file) {
+  const mt = (file.mimetype || '').toLowerCase();
+  if (mt && mt !== 'application/octet-stream') return mt;
+
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const map = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.csv': 'text/csv',
+    '.zip': 'application/zip',
+  };
+  return map[ext] || (mt || 'application/octet-stream');
 }
 
 function sanitizeUser(user) {

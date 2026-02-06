@@ -765,7 +765,7 @@ const App = {
     ).join('');
 
     const attachmentsHtml = (t.attachments || []).map(a => {
-      if (a.mime_type && a.mime_type.startsWith('image/')) {
+      if (isImageAttachment(a)) {
         return `<a href="/uploads/${a.filename}" target="_blank"><img src="/uploads/${a.filename}" class="attachment-preview" alt="${esc(a.original_name)}"></a>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" class="attachment">&#128206; ${esc(a.original_name)}</a>`;
@@ -1123,7 +1123,7 @@ const App = {
       : `<div class="user-avatar-placeholder">${(m.author_first_name || '?')[0].toUpperCase()}</div>`;
 
     const attachmentsHtml = (m.attachments || []).map(a => {
-      if (a.mime_type && a.mime_type.startsWith('image/')) {
+      if (isImageAttachment(a)) {
         return `<a href="/uploads/${a.filename}" target="_blank"><img src="/uploads/${a.filename}" class="attachment-preview" alt="${esc(a.original_name)}"></a>`;
       }
       return `<a href="/uploads/${a.filename}" target="_blank" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
@@ -1446,6 +1446,13 @@ function formatSize(bytes) {
   let i = 0;
   while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
   return `${bytes.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function isImageAttachment(att) {
+  const mt = (att?.mime_type || '').toLowerCase();
+  if (mt.startsWith('image/')) return true;
+  const name = (att?.original_name || att?.filename || '').toLowerCase();
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 }
 
 function isValidPortsInput(input) {
