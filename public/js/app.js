@@ -1335,77 +1335,79 @@ const App = {
       } catch (e) { this.toast(e.message, 'error'); }
     });
 
-    // File attach
-    document.getElementById('attach-btn').addEventListener('click', () => {
-      document.getElementById('file-input').click();
-    });
+    // File attach & message form (only if ticket is not archived)
+    const attachBtn = document.getElementById('attach-btn');
+    const fileInput = document.getElementById('file-input');
+    const messageInput = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-message-btn');
 
-    document.getElementById('file-input').addEventListener('change', (e) => {
-      for (const file of e.target.files) {
-        selectedFiles.push(file);
-      }
-      this.renderFilePreview(selectedFiles);
-      e.target.value = '';
-    });
+    if (attachBtn && fileInput && messageInput && sendBtn) {
+      attachBtn.addEventListener('click', () => fileInput.click());
 
-    // Paste images from clipboard (Ctrl+V), supports multiple
-    document.getElementById('message-input').addEventListener('paste', (e) => {
-      const items = Array.from(e.clipboardData?.items || []);
-      const images = items.filter(i => i.type.startsWith('image/'));
-      if (images.length === 0) return;
-
-      e.preventDefault();
-      const ts = Date.now();
-      let idx = 0;
-      for (const item of images) {
-        const blob = item.getAsFile();
-        if (!blob) continue;
-        selectedFiles.push(makePastedImageFile(blob, ts, idx++));
-      }
-      this.renderFilePreview(selectedFiles);
-      this.toast(`Добавлено изображений: ${images.length}`, 'success');
-    });
-
-    // Send message
-    document.getElementById('send-message-btn').addEventListener('click', async () => {
-      const content = document.getElementById('message-input').value.trim();
-      if (!content && selectedFiles.length === 0) return;
-
-      const btn = document.getElementById('send-message-btn');
-      btn.disabled = true;
-      btn.textContent = 'Отправка...';
-
-      const formData = new FormData();
-      formData.append('content', content);
-      selectedFiles.forEach((file, i) => {
-        formData.append('files', file, getAttachmentName(file, i));
+      fileInput.addEventListener('change', (e) => {
+        for (const file of e.target.files) {
+          selectedFiles.push(file);
+        }
+        this.renderFilePreview(selectedFiles);
+        e.target.value = '';
       });
 
-      try {
-        const msg = await this.api('POST', `/api/tickets/${ticket.id}/messages`, formData, true);
-        document.getElementById('message-input').value = '';
-        selectedFiles.length = 0;
+      // Paste images from clipboard (Ctrl+V), supports multiple
+      messageInput.addEventListener('paste', (e) => {
+        const items = Array.from(e.clipboardData?.items || []);
+        const images = items.filter(i => i.type.startsWith('image/'));
+        if (images.length === 0) return;
+
+        e.preventDefault();
+        const ts = Date.now();
+        let idx = 0;
+        for (const item of images) {
+          const blob = item.getAsFile();
+          if (!blob) continue;
+          selectedFiles.push(makePastedImageFile(blob, ts, idx++));
+        }
         this.renderFilePreview(selectedFiles);
+        this.toast(`Добавлено изображений: ${images.length}`, 'success');
+      });
 
-        const list = document.getElementById('messages-list');
-        list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
-        list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
-        this.bindMessageActions(ticket);
-        this.toast('Сообщение отправлено', 'success');
-      } catch (e) {
-        this.toast(e.message, 'error');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = 'Отправить';
-      }
-    });
+      // Send message
+      sendBtn.addEventListener('click', async () => {
+        const content = messageInput.value.trim();
+        if (!content && selectedFiles.length === 0) return;
 
-    // Ctrl+Enter to send
-    document.getElementById('message-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.ctrlKey) {
-        document.getElementById('send-message-btn').click();
-      }
-    });
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Отправка...';
+
+        const formData = new FormData();
+        formData.append('content', content);
+        selectedFiles.forEach((file, i) => {
+          formData.append('files', file, getAttachmentName(file, i));
+        });
+
+        try {
+          const msg = await this.api('POST', `/api/tickets/${ticket.id}/messages`, formData, true);
+          messageInput.value = '';
+          selectedFiles.length = 0;
+          this.renderFilePreview(selectedFiles);
+
+          const list = document.getElementById('messages-list');
+          list.insertAdjacentHTML('beforeend', this.renderMessage(msg));
+          list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+          this.bindMessageActions(ticket);
+          this.toast('Сообщение отправлено', 'success');
+        } catch (e) {
+          this.toast(e.message, 'error');
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'Отправить';
+        }
+      });
+
+      // Ctrl+Enter to send
+      messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.ctrlKey) sendBtn.click();
+      });
+    }
 
     // Message edit/delete actions
     this.bindMessageActions(ticket);
