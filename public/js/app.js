@@ -11,6 +11,11 @@ const App = {
   tags: [],
   config: {},
   authPollInterval: null,
+  // Presence tracking
+  _heartbeatInterval: null,
+  _presencePollInterval: null,
+  _onlineUsers: [],
+  _onlineCount: 0,
 
   async init() {
     // Telegram WebApp setup
@@ -109,11 +114,13 @@ const App = {
   render() {
     const app = document.getElementById('app');
     if (!this.user) {
+      this.stopPresence();
       app.innerHTML = this.renderLogin();
       this.bindLogin();
     } else {
       app.innerHTML = this.renderHeader() + '<div class="main" id="content"></div>';
       this.bindHeader();
+      this.startPresence();
       if (this._pendingTicketId) {
         const id = this._pendingTicketId;
         this._pendingTicketId = null;
@@ -258,6 +265,55 @@ const App = {
     }
   },
 
+  // ========== Presence Tracking ==========
+  startPresence() {
+    this.stopPresence();
+    if (!this.token) return;
+
+    // Poll presence every 10s
+    this._presencePollInterval = setInterval(() => this.pollPresence(), 10000);
+    this.pollPresence();
+
+    // Heartbeat every 15s
+    this._heartbeatInterval = setInterval(() => this.sendHeartbeat(), 15000);
+    this.sendHeartbeat();
+  },
+
+  stopPresence() {
+    if (this._heartbeatInterval) { clearInterval(this._heartbeatInterval); this._heartbeatInterval = null; }
+    if (this._presencePollInterval) { clearInterval(this._presencePollInterval); this._presencePollInterval = null; }
+  },
+
+  async sendHeartbeat() {
+    if (!this.token) return;
+    const view = this.currentView;
+    const ticketId = this._currentTicketId || null;
+    const ticketTitle = this._currentTicketTitle || null;
+    try {
+      await this.api('POST', '/api/presence/heartbeat', { view, ticketId, ticketTitle });
+    } catch {}
+  },
+
+  async pollPresence() {
+    if (!this.token) return;
+    try {
+      const data = await this.api('GET', '/api/presence/online');
+      this._onlineUsers = data.users;
+      this._onlineCount = data.count;
+      this.updateOnlineBadge();
+      // If on users/online view, refresh
+      if (this.currentView === 'online') {
+        const content = document.getElementById('content');
+        if (content) this.renderOnlineView(content);
+      }
+    } catch {}
+  },
+
+  updateOnlineBadge() {
+    const badge = document.getElementById('online-count-badge');
+    if (badge) badge.textContent = this._onlineCount;
+  },
+
   // ========== Header ==========
   renderHeader() {
     const avatarHtml = this.user.photo_url
@@ -290,6 +346,15 @@ const App = {
             <button class="nav-btn ${this.currentView === 'resource' ? 'active' : ''}" data-nav="resource">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7l8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
               Добавление своих сайтов/игр
+            </button>
+            <button class="nav-btn ${this.currentView === 'online' ? 'active' : ''}" data-nav="online">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+              <span>Онлайн</span>
+              <span class="online-badge" id="online-count-badge">${this._onlineCount}</span>
+            </button>
+            <button class="nav-btn ${this.currentView === 'users' ? 'active' : ''}" data-nav="users">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              Пользователи
             </button>
             <div class="mobile-nav-extra">
               <button class="btn btn-primary" data-mobile-action="new-ticket" style="width:100%">+ Новый тикет</button>
@@ -381,14 +446,28 @@ const App = {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
 
+    // Track current ticket for presence
+    if (view === 'ticket' && data) {
+      this._currentTicketId = data.id || null;
+      this._currentTicketTitle = data.title || null;
+    } else {
+      this._currentTicketId = null;
+      this._currentTicketTitle = null;
+    }
+
     switch (view) {
       case 'list': this.renderListView(content); break;
       case 'archive': this.renderArchiveView(content); break;
       case 'kanban': this.renderKanbanView(content); break;
       case 'resource': this.renderResourceRequestView(content); break;
+      case 'online': this.renderOnlineView(content); break;
+      case 'users': this.renderUsersView(content); break;
       case 'ticket': this.renderTicketView(content, data); break;
       default: this.renderListView(content);
     }
+
+    // Send heartbeat on navigation
+    this.sendHeartbeat();
   },
 
   // ========== Filter Persistence ==========
@@ -1026,6 +1105,11 @@ const App = {
 
     try {
       const ticket = await this.api('GET', `/api/tickets/${id}`);
+      // Update presence with ticket info
+      this._currentTicketId = ticket.id;
+      this._currentTicketTitle = ticket.title;
+      this.sendHeartbeat();
+
       container.innerHTML = this.renderTicketDetail(ticket);
       this.bindTicketDetail(ticket);
     } catch (e) {
@@ -1555,6 +1639,196 @@ const App = {
         this.renderFilePreview(files);
       });
     });
+  },
+
+  // ========== Online View ==========
+  renderOnlineView(container) {
+    const users = this._onlineUsers || [];
+    const viewLabels = {
+      list: 'Список тикетов',
+      kanban: 'Канбан',
+      archive: 'Архив',
+      resource: 'Сайты/Игры',
+      online: 'Онлайн',
+      users: 'Пользователи',
+      ticket: 'Просмотр тикета',
+    };
+
+    container.innerHTML = `
+      <div class="online-view">
+        <div class="online-header">
+          <h2>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+            Онлайн сейчас
+            <span class="online-total-badge">${users.length}</span>
+          </h2>
+          <p style="color:var(--text-muted);font-size:13px;margin-top:4px">Пользователи, которые сейчас на сайте, и что они просматривают</p>
+        </div>
+
+        ${users.length === 0 ? `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>
+            </svg>
+            <h3>Никого нет онлайн</h3>
+            <p>Сейчас на сайте нет других пользователей</p>
+          </div>
+        ` : `
+          <div class="online-users-grid">
+            ${users.map(u => {
+              const avatarHtml = u.photo_url
+                ? `<img src="${u.photo_url}" class="online-user-avatar" alt="">`
+                : `<div class="online-user-avatar-placeholder">${(u.first_name || '?')[0].toUpperCase()}</div>`;
+
+              const viewText = u.currentView === 'ticket' && u.currentTicketTitle
+                ? `${viewLabels.ticket}: <span class="online-ticket-link" data-ticket-id="${u.currentTicketId}">#${u.currentTicketId} ${esc(u.currentTicketTitle)}</span>`
+                : esc(viewLabels[u.currentView] || u.currentView);
+
+              return `
+                <div class="online-user-card">
+                  <div class="online-user-info">
+                    <div class="online-avatar-wrap">
+                      ${avatarHtml}
+                      <span class="online-dot"></span>
+                    </div>
+                    <div class="online-user-details">
+                      <div class="online-user-name">
+                        ${esc(u.first_name || u.username || 'Unknown')}
+                        ${u.username ? `<span class="online-user-username">@${esc(u.username)}</span>` : ''}
+                        ${u.is_admin ? '<span class="admin-badge">Админ</span>' : ''}
+                      </div>
+                      <div class="online-user-location">${viewText}</div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+    `;
+
+    // Bind ticket links
+    container.querySelectorAll('.online-ticket-link').forEach(link => {
+      link.style.cursor = 'pointer';
+      link.addEventListener('click', () => {
+        const id = link.dataset.ticketId;
+        location.hash = `ticket-${id}`;
+        this.navigate('ticket', { id });
+      });
+    });
+  },
+
+  // ========== All Users View ==========
+  async renderUsersView(container) {
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    try {
+      const data = await this.api('GET', '/api/users');
+      const users = data.users;
+
+      container.innerHTML = `
+        <div class="users-view">
+          <div class="online-header">
+            <h2>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              Все пользователи
+              <span class="online-total-badge" style="background:var(--bg-tertiary);color:var(--text-muted)">${users.length}</span>
+            </h2>
+            <p style="color:var(--text-muted);font-size:13px;margin-top:4px">Список всех зарегистрированных пользователей</p>
+          </div>
+
+          <div class="toolbar" style="margin-bottom:12px">
+            <input class="search-input" type="text" placeholder="Поиск пользователей..." id="users-search-input">
+          </div>
+
+          <div class="users-list" id="users-list-container">
+            ${this.renderUsersList(users)}
+          </div>
+        </div>
+      `;
+
+      // Search
+      let debounce = null;
+      document.getElementById('users-search-input')?.addEventListener('input', (e) => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          const q = e.target.value.toLowerCase();
+          const filtered = users.filter(u =>
+            (u.first_name || '').toLowerCase().includes(q) ||
+            (u.username || '').toLowerCase().includes(q) ||
+            (u.last_name || '').toLowerCase().includes(q)
+          );
+          document.getElementById('users-list-container').innerHTML = this.renderUsersList(filtered);
+        }, 200);
+      });
+    } catch (e) {
+      container.innerHTML = `<div class="empty-state"><h3>Ошибка</h3><p>${esc(e.message)}</p></div>`;
+    }
+  },
+
+  renderUsersList(users) {
+    if (!users.length) {
+      return `<div class="empty-state"><h3>Пользователей не найдено</h3></div>`;
+    }
+
+    // Find online user locations
+    const onlineMap = new Map();
+    for (const u of (this._onlineUsers || [])) {
+      onlineMap.set(u.id, u);
+    }
+
+    const viewLabels = {
+      list: 'Список тикетов',
+      kanban: 'Канбан',
+      archive: 'Архив',
+      resource: 'Сайты/Игры',
+      online: 'Онлайн',
+      users: 'Пользователи',
+      ticket: 'Просмотр тикета',
+    };
+
+    return users.map(u => {
+      const avatarHtml = u.photo_url
+        ? `<img src="${u.photo_url}" class="online-user-avatar" alt="">`
+        : `<div class="online-user-avatar-placeholder">${(u.first_name || '?')[0].toUpperCase()}</div>`;
+
+      const onlineInfo = onlineMap.get(u.id);
+      const statusHtml = u.is_online
+        ? `<span class="user-status-online">онлайн</span>`
+        : `<span class="user-status-offline">оффлайн</span>`;
+
+      let locationHtml = '';
+      if (onlineInfo) {
+        if (onlineInfo.currentView === 'ticket' && onlineInfo.currentTicketTitle) {
+          locationHtml = `<span class="user-current-location">${viewLabels.ticket}: #${onlineInfo.currentTicketId} ${esc(onlineInfo.currentTicketTitle)}</span>`;
+        } else {
+          locationHtml = `<span class="user-current-location">${esc(viewLabels[onlineInfo.currentView] || onlineInfo.currentView)}</span>`;
+        }
+      }
+
+      return `
+        <div class="user-list-row ${u.is_online ? 'is-online' : ''}">
+          <div class="online-avatar-wrap">
+            ${avatarHtml}
+            ${u.is_online ? '<span class="online-dot"></span>' : ''}
+          </div>
+          <div class="user-list-info">
+            <div class="user-list-name">
+              ${esc(u.first_name || 'Unknown')}
+              ${u.last_name ? ` ${esc(u.last_name)}` : ''}
+              ${u.username ? `<span class="online-user-username">@${esc(u.username)}</span>` : ''}
+              ${u.is_admin ? '<span class="admin-badge">Админ</span>' : ''}
+            </div>
+            <div class="user-list-meta">
+              ${statusHtml}
+              ${locationHtml}
+              <span class="user-list-date">Регистрация: ${timeAgo(u.created_at)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
   },
 
   // ========== Create Modal ==========

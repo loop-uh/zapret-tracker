@@ -1253,6 +1253,236 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   margin-bottom: 18px;
 }
 
+/* ========== Online Badge in Nav ========== */
+.online-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--green);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.nav-btn .online-badge {
+  margin-left: 2px;
+}
+
+/* ========== Online Users View ========== */
+.online-view,
+.users-view {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.online-header {
+  margin-bottom: 20px;
+}
+
+.online-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+}
+
+.online-total-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  background: var(--green);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ========== Online Users Grid ========== */
+.online-users-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 10px;
+}
+
+.online-user-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  transition: var(--transition);
+}
+
+.online-user-card:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+  box-shadow: var(--shadow-glow);
+}
+
+.online-user-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.online-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.online-user-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--green);
+}
+
+.online-user-avatar-placeholder {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0074e8, #4da3ff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+  color: white;
+  border: 2px solid var(--green);
+}
+
+.online-dot {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 12px;
+  height: 12px;
+  background: var(--green);
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  box-shadow: 0 0 6px var(--green-glow);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 4px var(--green-glow); }
+  50% { box-shadow: 0 0 10px rgba(34, 197, 94, .5); }
+}
+
+.online-user-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.online-user-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.online-user-username {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+.online-user-location {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.online-ticket-link {
+  color: var(--text-link);
+  cursor: pointer;
+}
+.online-ticket-link:hover {
+  text-decoration: underline;
+}
+
+/* ========== Users List ========== */
+.users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  transition: var(--transition);
+}
+
+.user-list-row:hover {
+  border-color: var(--border-glow);
+  background: var(--bg-card-hover);
+}
+
+.user-list-row.is-online {
+  border-left: 3px solid var(--green);
+}
+
+.user-list-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-list-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.user-list-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.user-status-online {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.user-status-offline {
+  color: var(--text-muted);
+}
+
+.user-current-location {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.user-list-date {
+  color: var(--text-muted);
+}
+
 /* ========== Hamburger Menu ========== */
 .hamburger-btn {
   display: none;
@@ -1348,6 +1578,7 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
 
 @media (max-width: 768px) {
   .kanban-board { grid-template-columns: 1fr; }
+  .online-users-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 480px) {

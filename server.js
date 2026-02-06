@@ -388,6 +388,61 @@ async function refreshUserAvatars() {
   }
 }
 
+// ========== Online Presence Tracking ==========
+
+// In-memory store: { sessionToken: { user, currentView, currentTicketId, lastSeen, sseRes } }
+const onlineUsers = new Map();
+// SSE clients for presence broadcast
+const presenceClients = new Set();
+
+function getOnlineList() {
+  const now = Date.now();
+  const TIMEOUT = 60_000; // 60s — user considered offline after this
+  const seen = new Map(); // deduplicate by user.id
+  for (const [, entry] of onlineUsers) {
+    if (now - entry.lastSeen > TIMEOUT) continue;
+    // Keep the most recent entry per user
+    const existing = seen.get(entry.user.id);
+    if (!existing || entry.lastSeen > existing.lastSeen) {
+      seen.set(entry.user.id, entry);
+    }
+  }
+  return Array.from(seen.values()).map(e => ({
+    id: e.user.id,
+    first_name: e.user.first_name,
+    username: e.user.username,
+    photo_url: e.user.photo_url,
+    is_admin: !!e.user.is_admin,
+    currentView: e.currentView || 'list',
+    currentTicketId: e.currentTicketId || null,
+    currentTicketTitle: e.currentTicketTitle || null,
+    lastSeen: e.lastSeen,
+  }));
+}
+
+function broadcastPresence() {
+  const list = getOnlineList();
+  const data = JSON.stringify({ type: 'presence', users: list, count: list.length });
+  for (const client of presenceClients) {
+    try {
+      client.write(`data: ${data}\n\n`);
+    } catch {
+      presenceClients.delete(client);
+    }
+  }
+}
+
+// Periodic cleanup of stale entries and broadcast
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of onlineUsers) {
+    if (now - entry.lastSeen > 120_000) { // 2 min — remove completely
+      onlineUsers.delete(token);
+    }
+  }
+  broadcastPresence();
+}, 10_000); // every 10 seconds
+
 // ========== Notifications ==========
 
 async function notifySubscribers(ticketId, authorUserId, text) {
@@ -989,6 +1044,68 @@ app.post('/api/tags', authMiddleware, adminMiddleware, (req, res) => {
 
 app.get('/api/stats', authMiddleware, (req, res) => {
   res.json(db.getStats());
+});
+
+// --- Online Presence ---
+
+// SSE endpoint: real-time stream of online users
+app.get('/api/presence/stream', authMiddleware, (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Nginx: disable buffering
+  res.flushHeaders();
+
+  presenceClients.add(res);
+
+  // Send current state immediately
+  const list = getOnlineList();
+  res.write(`data: ${JSON.stringify({ type: 'presence', users: list, count: list.length })}\n\n`);
+
+  req.on('close', () => {
+    presenceClients.delete(res);
+  });
+});
+
+// Heartbeat: frontend sends current view every 15s
+app.post('/api/presence/heartbeat', authMiddleware, (req, res) => {
+  const { view, ticketId, ticketTitle } = req.body;
+  const token = req.headers.authorization?.replace('Bearer ', '');
+
+  onlineUsers.set(token, {
+    user: req.user,
+    currentView: view || 'list',
+    currentTicketId: ticketId || null,
+    currentTicketTitle: ticketTitle || null,
+    lastSeen: Date.now(),
+  });
+
+  broadcastPresence();
+  res.json({ ok: true });
+});
+
+// GET online users list (for initial load / non-SSE fallback)
+app.get('/api/presence/online', authMiddleware, (req, res) => {
+  const list = getOnlineList();
+  res.json({ users: list, count: list.length });
+});
+
+// GET all registered users
+app.get('/api/users', authMiddleware, (req, res) => {
+  const users = db.getDb().prepare(`
+    SELECT id, telegram_id, username, first_name, last_name, photo_url, is_admin, created_at, last_login
+    FROM users ORDER BY last_login DESC
+  `).all();
+
+  // Enrich with online status
+  const onlineIds = new Set(getOnlineList().map(u => u.id));
+  const result = users.map(u => ({
+    ...u,
+    is_admin: !!u.is_admin,
+    is_online: onlineIds.has(u.id),
+  }));
+
+  res.json({ users: result, total: result.length });
 });
 
 // --- Config (public) ---
