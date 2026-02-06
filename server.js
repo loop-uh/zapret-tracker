@@ -2431,15 +2431,20 @@ app.get('/api/presets', authMiddleware, (req, res) => {
 
 // Get single preset with comments
 app.get('/api/presets/:id', authMiddleware, (req, res) => {
-  const preset = db.getPresetById(parseInt(req.params.id));
-  if (!preset) return res.status(404).json({ error: 'Preset not found' });
+  try {
+    const preset = db.getPresetById(parseInt(req.params.id));
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
 
-  preset.comments = db.getPresetComments(preset.id);
-  for (const c of preset.comments) {
-    applyMaskToMessageAuthor(c, req.user);
+    preset.comments = db.getPresetComments(preset.id);
+    for (const c of preset.comments) {
+      applyMaskToMessageAuthor(c, req.user);
+    }
+    applyMaskToPresetAuthor(preset, req.user);
+    res.json(preset);
+  } catch (e) {
+    console.error('GET /api/presets/:id error:', e);
+    res.status(500).json({ error: e.message });
   }
-  applyMaskToPresetAuthor(preset, req.user);
-  res.json(preset);
 });
 
 // Get preset file content (read txt file and return as text)
