@@ -3382,23 +3382,24 @@ function esc(str) {
 }
 
 // ========== Markdown Rendering ==========
-const _mdRenderer = (() => {
-  if (typeof marked === 'undefined') return null;
-  const renderer = new marked.Renderer();
-  const origLink = renderer.link.bind(renderer);
-  renderer.link = function({ href, title, tokens }) {
-    const text = this.parser.parseInline(tokens);
-    const titleAttr = title ? ` title="${title}"` : '';
-    return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
-  };
-  return renderer;
-})();
+if (typeof marked !== 'undefined') {
+  marked.use({
+    breaks: true,
+    gfm: true,
+    renderer: {
+      link({ href, title, text }) {
+        const titleAttr = title ? ` title="${esc(title)}"` : '';
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
+      }
+    }
+  });
+}
 
 function renderMarkdown(text) {
   if (!text) return '';
   if (typeof marked === 'undefined') return esc(text);
   try {
-    const html = marked.parse(text, { breaks: true, gfm: true, renderer: _mdRenderer });
+    const html = marked.parse(text);
     if (typeof DOMPurify !== 'undefined') {
       return DOMPurify.sanitize(html, {
         ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
