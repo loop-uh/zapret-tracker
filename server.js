@@ -1,0 +1,688 @@
+const express = require('express');
+const multer = require('multer');
+const path = require('path');
+const crypto = require('crypto');
+const fs = require('fs');
+const db = require('./database');
+
+// ========== Config ==========
+
+const CONFIG = {
+  port: process.env.PORT || 3000,
+  host: process.env.HOST || '0.0.0.0',
+  botToken: process.env.BOT_TOKEN || '',
+  botUsername: process.env.BOT_USERNAME || '',
+  siteUrl: process.env.SITE_URL || 'http://88.210.52.47',
+  adminTelegramId: 6483277608,
+  maxFileSize: 50 * 1024 * 1024, // 50MB
+  uploadDir: path.join(__dirname, 'uploads'),
+  sessionSecret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
+};
+
+// ========== Init ==========
+
+db.init();
+
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(CONFIG.uploadDir));
+
+// ========== File Upload ==========
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = CONFIG.uploadDir;
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const name = crypto.randomBytes(16).toString('hex') + ext;
+    cb(null, name);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: CONFIG.maxFileSize },
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp|pdf|doc|docx|txt|zip|rar|7z|log|conf|json|xml|csv|mp4|webm/;
+    const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+    if (allowed.test(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not allowed'), false);
+    }
+  },
+});
+
+// ========== Sessions ==========
+
+const sessions = new Map();
+
+function createSession(user) {
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, { userId: user.id, createdAt: Date.now() });
+  return token;
+}
+
+function authMiddleware(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token || !sessions.has(token)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const session = sessions.get(token);
+  const user = db.getUserById(session.userId);
+  if (!user) {
+    sessions.delete(token);
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  req.user = user;
+  next();
+}
+
+function adminMiddleware(req, res, next) {
+  if (!req.user || !req.user.is_admin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
+// ========== Telegram Bot Polling ==========
+// Handles /start commands for auth + captures chat_id for notifications
+// Works on bare IP — no domain or webhook needed
+
+let botPollingOffset = 0;
+let botPollingActive = false;
+
+async function tgApi(method, body) {
+  if (!CONFIG.botToken) return null;
+  const fetch = require('node-fetch');
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${CONFIG.botToken}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    return data.ok ? data.result : null;
+  } catch (e) {
+    console.error(`TG API ${method} error:`, e.message);
+    return null;
+  }
+}
+
+async function sendTgMessage(chatId, text, extra = {}) {
+  return tgApi('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', ...extra });
+}
+
+async function startBotPolling() {
+  if (!CONFIG.botToken || botPollingActive) return;
+  botPollingActive = true;
+  console.log('Telegram bot polling started');
+
+  // Set bot commands
+  await tgApi('setMyCommands', {
+    commands: [
+      { command: 'start', description: 'Авторизация / Старт' },
+      { command: 'help', description: 'Помощь' },
+    ],
+  });
+
+  pollLoop();
+}
+
+async function pollLoop() {
+  if (!botPollingActive) return;
+  try {
+    const updates = await tgApi('getUpdates', {
+      offset: botPollingOffset,
+      timeout: 25,
+      allowed_updates: ['message'],
+    });
+
+    if (updates && updates.length > 0) {
+      for (const update of updates) {
+        botPollingOffset = update.update_id + 1;
+        await handleBotUpdate(update);
+      }
+    }
+  } catch (e) {
+    console.error('Polling error:', e.message);
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  // Schedule next poll
+  setTimeout(pollLoop, 500);
+}
+
+async function handleBotUpdate(update) {
+  const msg = update.message;
+  if (!msg || !msg.text) return;
+
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const text = msg.text.trim();
+
+  // Always update chat_id for known users
+  db.updateUserChatId(userId, chatId);
+
+  if (text.startsWith('/start')) {
+    const parts = text.split(' ');
+    const authToken = parts.length > 1 ? parts[1] : null;
+
+    if (authToken) {
+      // Auth flow: /start <token>
+      const tokenRow = db.getAuthToken(authToken);
+      if (!tokenRow) {
+        await sendTgMessage(chatId, 'Ссылка для входа устарела. Попробуйте ещё раз на сайте.');
+        return;
+      }
+      if (tokenRow.confirmed) {
+        await sendTgMessage(chatId, 'Вы уже авторизованы. Вернитесь на сайт.');
+        return;
+      }
+
+      // Get user profile photos
+      let photoUrl = null;
+      try {
+        const photos = await tgApi('getUserProfilePhotos', { user_id: userId, limit: 1 });
+        if (photos && photos.total_count > 0) {
+          const fileId = photos.photos[0][0].file_id;
+          const file = await tgApi('getFile', { file_id: fileId });
+          if (file) {
+            photoUrl = `https://api.telegram.org/file/bot${CONFIG.botToken}/${file.file_path}`;
+          }
+        }
+      } catch {}
+
+      // Confirm auth token
+      db.confirmAuthToken(authToken, {
+        telegram_id: userId,
+        chat_id: chatId,
+        username: msg.from.username,
+        first_name: msg.from.first_name || 'User',
+        last_name: msg.from.last_name,
+        photo_url: photoUrl,
+      });
+
+      await sendTgMessage(chatId,
+        `Вы успешно авторизованы в Zapret Tracker!\n\n` +
+        `Вернитесь на сайт — вход произойдёт автоматически.\n` +
+        `Вы будете получать уведомления о новых сообщениях в ваших тикетах.`
+      );
+    } else {
+      // Just /start without token
+      const siteUrl = CONFIG.siteUrl;
+      await sendTgMessage(chatId,
+        `Добро пожаловать в <b>Zapret Tracker</b>!\n\n` +
+        `Это бот для уведомлений трекера багов и идей проекта Zapret.\n\n` +
+        `Откройте сайт для работы с трекером:\n${siteUrl}\n\n` +
+        `Вы будете автоматически получать уведомления о:\n` +
+        `- Новых сообщениях в ваших тикетах\n` +
+        `- Изменениях статуса ваших тикетов\n` +
+        `- Новых сообщениях в тикетах, на которые вы подписаны`
+      );
+    }
+  } else if (text === '/help') {
+    await sendTgMessage(chatId,
+      `<b>Zapret Tracker Bot</b>\n\n` +
+      `Этот бот отправляет уведомления о событиях в трекере.\n\n` +
+      `Для входа на сайт нажмите кнопку "Войти через Telegram" на ${CONFIG.siteUrl}\n\n` +
+      `Команды:\n` +
+      `/start — Авторизация\n` +
+      `/help — Помощь`
+    );
+  }
+}
+
+// ========== Notifications ==========
+
+async function notifySubscribers(ticketId, authorUserId, text) {
+  if (!CONFIG.botToken) return;
+
+  const subscribers = db.getSubscribers(ticketId);
+  for (const sub of subscribers) {
+    // Don't notify the author of the message
+    if (sub.id === authorUserId) continue;
+    if (!sub.chat_id) continue;
+
+    try {
+      await sendTgMessage(sub.chat_id, text, {
+        reply_markup: {
+          inline_keyboard: [[{
+            text: 'Открыть тикет',
+            url: `${CONFIG.siteUrl}/#ticket-${ticketId}`,
+          }]],
+        },
+      });
+    } catch (e) {
+      console.error(`Failed to notify user ${sub.id}:`, e.message);
+    }
+  }
+}
+
+async function notifyAdmin(text) {
+  if (!CONFIG.botToken) return;
+  const admin = db.getUserByTelegramId(CONFIG.adminTelegramId);
+  if (admin && admin.chat_id) {
+    await sendTgMessage(admin.chat_id, text);
+  }
+}
+
+// ========== API Routes ==========
+
+// --- Auth ---
+
+// Step 1: Frontend requests a login token
+app.post('/api/auth/request', (req, res) => {
+  const token = crypto.randomBytes(20).toString('hex');
+  db.createAuthToken(token);
+
+  const botLink = CONFIG.botUsername
+    ? `https://t.me/${CONFIG.botUsername}?start=${token}`
+    : null;
+
+  res.json({ token, botLink });
+});
+
+// Step 2: Frontend polls to check if user confirmed in bot
+app.get('/api/auth/check/:token', (req, res) => {
+  const tokenRow = db.getAuthToken(req.params.token);
+  if (!tokenRow) {
+    return res.json({ confirmed: false, expired: true });
+  }
+  if (!tokenRow.confirmed) {
+    return res.json({ confirmed: false, expired: false });
+  }
+
+  // Create user and session
+  const user = db.findOrCreateUser({
+    id: tokenRow.telegram_id,
+    chat_id: tokenRow.chat_id,
+    username: tokenRow.username,
+    first_name: tokenRow.first_name,
+    last_name: tokenRow.last_name,
+    photo_url: tokenRow.photo_url,
+  });
+
+  const sessionToken = createSession(user);
+  db.deleteAuthToken(req.params.token);
+
+  res.json({ confirmed: true, token: sessionToken, user: sanitizeUser(user) });
+});
+
+// Dev login (only works when BOT_TOKEN is not set)
+app.post('/api/auth/dev', (req, res) => {
+  if (CONFIG.botToken) {
+    return res.status(403).json({ error: 'Dev login disabled when bot is configured' });
+  }
+  const data = req.body;
+  if (!data || !data.id) {
+    return res.status(400).json({ error: 'Invalid data' });
+  }
+
+  const user = db.findOrCreateUser({
+    id: parseInt(data.id),
+    username: data.username,
+    first_name: data.first_name || 'Dev User',
+    last_name: null,
+    photo_url: null,
+    chat_id: null,
+  });
+
+  const token = createSession(user);
+  res.json({ token, user: sanitizeUser(user) });
+});
+
+app.get('/api/auth/me', authMiddleware, (req, res) => {
+  res.json({ user: sanitizeUser(req.user) });
+});
+
+app.post('/api/auth/logout', authMiddleware, (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  sessions.delete(token);
+  res.json({ ok: true });
+});
+
+// --- Tickets ---
+
+app.get('/api/tickets', authMiddleware, (req, res) => {
+  const { status, type, priority, author_id, search, tag_id, page } = req.query;
+  const result = db.getTickets({
+    status, type, priority, author_id, search, tag_id,
+    page: parseInt(page) || 1,
+    is_admin: req.user.is_admin,
+    user_id: req.user.id,
+  });
+  const userVotes = db.getUserVotes(req.user.id);
+  const userSubs = db.getUserSubscriptions(req.user.id);
+  result.tickets = result.tickets.map(t => ({
+    ...t,
+    user_voted: userVotes.includes(t.id),
+    user_subscribed: userSubs.includes(t.id),
+  }));
+  res.json(result);
+});
+
+app.get('/api/tickets/kanban', authMiddleware, (req, res) => {
+  const statuses = ['open', 'in_progress', 'review', 'testing', 'closed'];
+  const result = {};
+  const userVotes = db.getUserVotes(req.user.id);
+
+  for (const status of statuses) {
+    const data = db.getTickets({
+      status,
+      is_admin: req.user.is_admin,
+      user_id: req.user.id,
+      limit: 100,
+    });
+    result[status] = data.tickets.map(t => ({ ...t, user_voted: userVotes.includes(t.id) }));
+  }
+
+  res.json(result);
+});
+
+app.get('/api/tickets/:id', authMiddleware, (req, res) => {
+  const ticket = db.getTicketById(parseInt(req.params.id));
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const userVotes = db.getUserVotes(req.user.id);
+  ticket.user_voted = userVotes.includes(ticket.id);
+  ticket.user_subscribed = db.isSubscribed(req.user.id, ticket.id);
+  ticket.messages = db.getMessages(ticket.id);
+
+  res.json(ticket);
+});
+
+app.post('/api/tickets', authMiddleware, (req, res) => {
+  const { title, description, type, priority, is_private, tags } = req.body;
+
+  if (!title || !type) {
+    return res.status(400).json({ error: 'Title and type are required' });
+  }
+
+  const ticket = db.createTicket({
+    title, description, type,
+    priority: priority || 'medium',
+    is_private: is_private ? 1 : 0,
+    author_id: req.user.id,
+    tags: tags || [],
+  });
+
+  // Notify admin about new ticket (if author is not admin)
+  if (!req.user.is_admin) {
+    const typeLabels = { bug: 'Баг', idea: 'Идея', feature: 'Фича', improvement: 'Улучшение' };
+    const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
+    notifyAdmin(
+      `🆕 Новый ${typeLabels[type]}: <b>${escHtml(title)}</b>\n` +
+      `Автор: ${authorName}\n` +
+      `Приоритет: ${priority || 'medium'}\n` +
+      (is_private ? '🔒 Приватный' : '🌐 Публичный')
+    );
+  }
+
+  res.json(ticket);
+});
+
+app.put('/api/tickets/:id', authMiddleware, (req, res) => {
+  const ticket = db.getTicketById(parseInt(req.params.id));
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  if (!req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const updates = req.body;
+  if (!req.user.is_admin) {
+    delete updates.status;
+    delete updates.assigned_to;
+    delete updates.is_private;
+  }
+
+  // Log and notify on status change
+  if (updates.status && updates.status !== ticket.status) {
+    db.addMessage({
+      ticket_id: ticket.id,
+      author_id: req.user.id,
+      content: `Статус изменён: ${statusLabel(ticket.status)} → ${statusLabel(updates.status)}`,
+      is_system: true,
+    });
+
+    notifySubscribers(ticket.id, req.user.id,
+      `🔄 Статус тикета #${ticket.id} изменён\n` +
+      `<b>${escHtml(ticket.title)}</b>\n` +
+      `${statusLabel(ticket.status)} → ${statusLabel(updates.status)}`
+    );
+  }
+
+  const updated = db.updateTicket(parseInt(req.params.id), updates);
+  res.json(updated);
+});
+
+app.delete('/api/tickets/:id', authMiddleware, (req, res) => {
+  const ticket = db.getTicketById(parseInt(req.params.id));
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  if (!req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  db.deleteTicket(parseInt(req.params.id));
+  res.json({ ok: true });
+});
+
+// --- Messages ---
+// Any authenticated user can comment on public open tickets
+// Private tickets: only admin and author
+
+app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10), (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  // Access check: private tickets are restricted
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  // Public tickets: anyone can comment (no extra restrictions)
+
+  const content = req.body.content;
+  if (!content && (!req.files || req.files.length === 0)) {
+    return res.status(400).json({ error: 'Content or files required' });
+  }
+
+  const message = db.addMessage({
+    ticket_id: ticketId,
+    author_id: req.user.id,
+    content: content || '',
+  });
+
+  // Handle file attachments
+  if (req.files && req.files.length > 0) {
+    message.attachments = [];
+    for (const file of req.files) {
+      const attachment = db.addAttachment({
+        ticket_id: ticketId,
+        message_id: message.id,
+        filename: file.filename,
+        original_name: file.originalname,
+        mime_type: file.mimetype,
+        size: file.size,
+      });
+      message.attachments.push(attachment);
+    }
+  }
+
+  // Auto-subscribe commenter to this ticket
+  db.subscribe(req.user.id, ticketId);
+
+  // Notify all subscribers (except the author of this message)
+  const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
+  notifySubscribers(ticketId, req.user.id,
+    `💬 Новое сообщение в #${ticketId}\n` +
+    `<b>${escHtml(ticket.title)}</b>\n` +
+    `От: ${authorName}\n\n` +
+    `${content ? escHtml(content.substring(0, 300)) : '[файлы]'}`
+  );
+
+  res.json(message);
+});
+
+// --- File Upload to ticket ---
+
+app.post('/api/tickets/:id/upload', authMiddleware, upload.array('files', 10), (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const attachments = [];
+
+  if (req.files) {
+    for (const file of req.files) {
+      const attachment = db.addAttachment({
+        ticket_id: ticketId,
+        message_id: null,
+        filename: file.filename,
+        original_name: file.originalname,
+        mime_type: file.mimetype,
+        size: file.size,
+      });
+      attachments.push(attachment);
+    }
+  }
+
+  res.json({ attachments });
+});
+
+// --- Votes ---
+
+app.post('/api/tickets/:id/vote', authMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  const result = db.toggleVote(req.user.id, ticketId);
+  const updatedTicket = db.getTicketById(ticketId);
+  res.json({ ...result, votes_count: updatedTicket.votes_count });
+});
+
+// --- Subscriptions ---
+
+app.post('/api/tickets/:id/subscribe', authMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  db.subscribe(req.user.id, ticketId);
+  res.json({ subscribed: true });
+});
+
+app.post('/api/tickets/:id/unsubscribe', authMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  db.unsubscribe(req.user.id, ticketId);
+  res.json({ subscribed: false });
+});
+
+// --- Tags ---
+
+app.get('/api/tags', (req, res) => {
+  res.json(db.getAllTags());
+});
+
+app.post('/api/tags', authMiddleware, adminMiddleware, (req, res) => {
+  const { name, color } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name required' });
+  const tag = db.createTag(name, color);
+  res.json(tag);
+});
+
+// --- Stats ---
+
+app.get('/api/stats', authMiddleware, (req, res) => {
+  res.json(db.getStats());
+});
+
+// --- Config (public) ---
+
+app.get('/api/config', (req, res) => {
+  res.json({
+    botUsername: CONFIG.botUsername,
+    hasBotToken: !!CONFIG.botToken,
+  });
+});
+
+// --- SPA Fallback ---
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ========== Error Handler ==========
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ error: `Upload error: ${err.message}` });
+  }
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// ========== Helpers ==========
+
+function sanitizeUser(user) {
+  return {
+    id: user.id,
+    telegram_id: user.telegram_id,
+    username: user.username,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    photo_url: user.photo_url,
+    is_admin: !!user.is_admin,
+    has_chat_id: !!user.chat_id,
+  };
+}
+
+function statusLabel(status) {
+  const labels = {
+    open: 'Открыто',
+    in_progress: 'В работе',
+    review: 'На ревью',
+    testing: 'Тестирование',
+    closed: 'Закрыто',
+    rejected: 'Отклонено',
+    duplicate: 'Дубликат',
+  };
+  return labels[status] || status;
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ========== Cleanup interval ==========
+
+setInterval(() => {
+  db.cleanupAuthTokens();
+}, 5 * 60 * 1000);
+
+// ========== Start ==========
+
+app.listen(CONFIG.port, CONFIG.host, () => {
+  console.log(`Zapret Tracker running at http://${CONFIG.host}:${CONFIG.port}`);
+  console.log(`Admin Telegram ID: ${CONFIG.adminTelegramId}`);
+  if (CONFIG.botToken) {
+    console.log(`Bot: @${CONFIG.botUsername}`);
+    startBotPolling();
+  } else {
+    console.log('WARNING: BOT_TOKEN not set — dev mode (no Telegram auth, no notifications)');
+  }
+});
