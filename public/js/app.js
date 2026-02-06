@@ -1970,25 +1970,48 @@ const App = {
         e.target.value = '';
       });
 
-      // Paste images from clipboard (Ctrl+V), supports multiple
-      messageInput.addEventListener('paste', (e) => {
+      // Paste images from clipboard (Ctrl+V / Win+. emoji picker), supports multiple
+      messageInput.addEventListener('paste', async (e) => {
         const items = Array.from(e.clipboardData?.items || []);
         const images = items.filter(i => i.type.startsWith('image/'));
-        if (images.length === 0) return;
+
+        // Handle direct image blobs (Ctrl+V)
+        if (images.length > 0) {
+          e.preventDefault();
+          const ts = Date.now();
+          let idx = 0;
+          const pastedFiles = [];
+          for (const item of images) {
+            const blob = item.getAsFile();
+            if (!blob) continue;
+            pastedFiles.push(makePastedImageFile(blob, ts, idx++));
+          }
+          const accepted = filterOversizedFiles(pastedFiles, (msg, type) => this.toast(msg, type));
+          for (const f of accepted) selectedFiles.push(f);
+          this.renderFilePreview(selectedFiles);
+          if (accepted.length > 0) this.toast(`Добавлено изображений: ${accepted.length}`, 'success');
+          return;
+        }
+
+        // Handle GIF from Win+. emoji picker (arrives as text/html with <img src="...tenor/giphy...">)
+        const html = e.clipboardData?.getData('text/html') || '';
+        const gifUrlMatch = html.match(/<img[^>]+src=["']([^"']*(?:tenor\.com|giphy\.com)[^"']*)["']/i);
+        if (!gifUrlMatch) return;
 
         e.preventDefault();
-        const ts = Date.now();
-        let idx = 0;
-        const pastedFiles = [];
-        for (const item of images) {
-          const blob = item.getAsFile();
-          if (!blob) continue;
-          pastedFiles.push(makePastedImageFile(blob, ts, idx++));
+        const gifUrl = gifUrlMatch[1];
+
+        this.toast('Загрузка GIF...', 'info');
+        try {
+          const result = await this.api('POST', '/api/gif-proxy', { url: gifUrl });
+          // Create a virtual file object that the upload flow understands
+          const gifFile = { _isProxied: true, ...result };
+          selectedFiles.push(gifFile);
+          this.renderFilePreview(selectedFiles);
+          this.toast('GIF добавлен', 'success');
+        } catch (err) {
+          this.toast('Не удалось загрузить GIF: ' + (err.message || 'ошибка'), 'error');
         }
-        const accepted = filterOversizedFiles(pastedFiles, (msg, type) => this.toast(msg, type));
-        for (const f of accepted) selectedFiles.push(f);
-        this.renderFilePreview(selectedFiles);
-        if (accepted.length > 0) this.toast(`Добавлено изображений: ${accepted.length}`, 'success');
       });
 
       // Send message
@@ -2001,9 +2024,17 @@ const App = {
 
         const formData = new FormData();
         formData.append('content', content);
+        const proxiedFiles = [];
         selectedFiles.forEach((file, i) => {
-          formData.append('files', file, getAttachmentName(file, i));
+          if (file._isProxied) {
+            proxiedFiles.push({ filename: file.filename, original_name: file.original_name, mime_type: file.mime_type, size: file.size });
+          } else {
+            formData.append('files', file, getAttachmentName(file, i));
+          }
         });
+        if (proxiedFiles.length > 0) {
+          formData.append('proxied_files', JSON.stringify(proxiedFiles));
+        }
 
         try {
           const msg = await this.api('POST', `/api/tickets/${ticket.id}/messages`, formData, true);
@@ -3025,6 +3056,132 @@ const App = {
     `;
   },
 
+  // ========== Presets View ==========
+  async renderPresetsView(container) {
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    try {
+      const data = await this.api('GET', '/api/presets?sort=newest');
+      this._presetsData = data;
+      const esc = (s) => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+      const formatDate = (d) => { if (!d) return ''; const dt = new Date(d + (d.includes('T') ? '' : 'T00:00:00')); return dt.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
+      const formatSize = (bytes) => { if (!bytes) return '0 B'; if (bytes < 1024) return bytes + ' B'; if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB'; return (bytes/1024/1024).toFixed(1) + ' MB'; };
+      const presetCards = data.presets.map(p => {
+        const authorName = p.author_username ? '@' + esc(p.author_username) : esc(p.author_first_name);
+        const avatarHtml = p.author_photo ? '<img src="' + esc(p.author_photo) + '" class="avatar-sm" alt="">' : '<div class="avatar-sm avatar-placeholder">' + esc((p.author_first_name || '?')[0]) + '</div>';
+        return '<div class="preset-card" data-preset-id="' + p.id + '"><div class="preset-card-header"><div class="preset-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div><div class="preset-card-title"><h3>' + esc(p.title) + '</h3><span class="preset-card-file">' + esc(p.original_name) + ' (' + formatSize(p.file_size) + ')</span></div></div>' + (p.description ? '<p class="preset-card-desc">' + esc(p.description) + '</p>' : '') + '<div class="preset-card-meta"><span class="preset-card-author">' + avatarHtml + ' ' + authorName + '</span><span class="preset-card-date">' + formatDate(p.created_at) + '</span><span class="preset-card-stats"><span title="Скачивания">&#11015; ' + (p.download_count || 0) + '</span><span title="Комментарии">&#128172; ' + (p.comment_count || 0) + '</span></span></div></div>';
+      }).join('');
+      container.innerHTML = '<div class="presets-view"><div class="presets-header"><div><h1>Пресеты</h1><p class="presets-description">Пресеты — это готовые конфигурации (txt-файлы) для Zapret GUI, которыми пользователи делятся друг с другом. Каждый пресет содержит настройки обхода блокировок для определённых сайтов, провайдеров или сценариев. Вы можете скачать подходящий пресет и импортировать его в свою копию Zapret GUI, а также поделиться собственным пресетом с сообществом.</p></div><button class="btn btn-primary" id="create-preset-btn">+ Опубликовать пресет</button></div><div class="presets-toolbar"><input type="text" class="input" id="presets-search" placeholder="Поиск по названию или описанию..." value="" style="max-width:350px"><select class="input" id="presets-sort" style="max-width:200px"><option value="newest">Сначала новые</option><option value="oldest">Сначала старые</option><option value="most_downloaded">По скачиваниям</option><option value="most_commented">По комментариям</option></select></div><div class="presets-list" id="presets-list">' + (data.presets.length > 0 ? presetCards : '<div class="empty-state"><h3>Пресетов пока нет</h3><p>Будьте первым, кто опубликует свой пресет!</p></div>') + '</div>' + (data.total > data.limit ? '<div class="pagination">' + (data.page > 1 ? '<button class="btn btn-sm" data-presets-page="' + (data.page - 1) + '">&larr; Назад</button>' : '') + '<span>Страница ' + data.page + ' из ' + Math.ceil(data.total / data.limit) + '</span>' + (data.page < Math.ceil(data.total / data.limit) ? '<button class="btn btn-sm" data-presets-page="' + (data.page + 1) + '">Далее &rarr;</button>' : '') + '</div>' : '') + '</div>';
+      this.bindPresetsView();
+    } catch (e) {
+      container.innerHTML = '<div class="empty-state"><h3>Ошибка загрузки</h3><p>' + e.message + '</p></div>';
+    }
+  },
+  bindPresetsView() {
+    document.querySelectorAll('.preset-card').forEach(card => { card.addEventListener('click', () => { const id = card.dataset.presetId; location.hash = 'preset-' + id; this.navigate('preset', { id }); }); });
+    document.getElementById('create-preset-btn')?.addEventListener('click', () => this.showCreatePresetModal());
+    let searchTimeout; document.getElementById('presets-search')?.addEventListener('input', () => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => this.loadPresetsFiltered(), 300); });
+    document.getElementById('presets-sort')?.addEventListener('change', () => this.loadPresetsFiltered());
+    document.querySelectorAll('[data-presets-page]').forEach(btn => { btn.addEventListener('click', () => { this.loadPresetsFiltered(parseInt(btn.dataset.presetsPage)); }); });
+  },
+  async loadPresetsFiltered(page) {
+    page = page || 1;
+    const search = document.getElementById('presets-search')?.value || '';
+    const sort = document.getElementById('presets-sort')?.value || 'newest';
+    const params = new URLSearchParams({ sort, page });
+    if (search.trim()) params.set('search', search.trim());
+    try { const data = await this.api('GET', '/api/presets?' + params); this._presetsData = data; const content = document.getElementById('content'); if (content && this.currentView === 'presets') { this.renderPresetsView(content); } } catch (e) { this.toast('Ошибка загрузки пресетов: ' + e.message, 'error'); }
+  },
+  showCreatePresetModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay active';
+    overlay.innerHTML = '<div class="modal" style="max-width:560px"><div class="modal-header"><h2>Опубликовать пресет</h2><button class="modal-close" id="close-preset-modal">&times;</button></div><div class="modal-body"><div class="form-group"><label>Название пресета *</label><input type="text" class="input" id="preset-title" placeholder="Например: МТС стратегия для YouTube" maxlength="200"></div><div class="form-group"><label>Описание</label><textarea class="input" id="preset-description" rows="4" placeholder="Опишите для какого провайдера, какие сайты, особенности настройки..."></textarea></div><div class="form-group"><label>Файл пресета (.txt) *</label><div class="preset-file-upload" id="preset-file-drop"><input type="file" id="preset-file-input" accept=".txt" style="display:none"><div class="preset-file-placeholder" id="preset-file-placeholder"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:0.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><p>Перетащите .txt файл сюда или нажмите для выбора</p></div><div class="preset-file-selected" id="preset-file-selected" style="display:none"><span id="preset-file-name"></span><button class="btn btn-sm" id="preset-file-remove" type="button">Удалить</button></div></div><div class="preset-file-preview" id="preset-file-preview" style="display:none"><label>Предпросмотр файла:</label><pre class="preset-file-content" id="preset-file-content-preview"></pre></div></div></div><div class="modal-footer"><button class="btn" id="cancel-preset-btn">Отмена</button><button class="btn btn-primary" id="submit-preset-btn">Опубликовать</button></div></div>';
+    document.body.appendChild(overlay);
+    let selectedFile = null;
+    const closeModal = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    document.getElementById('close-preset-modal').addEventListener('click', closeModal);
+    document.getElementById('cancel-preset-btn').addEventListener('click', closeModal);
+    const fileInput = document.getElementById('preset-file-input');
+    const fileDrop = document.getElementById('preset-file-drop');
+    const placeholder = document.getElementById('preset-file-placeholder');
+    const selectedDiv = document.getElementById('preset-file-selected');
+    const fileNameEl = document.getElementById('preset-file-name');
+    const previewDiv = document.getElementById('preset-file-preview');
+    const previewContent = document.getElementById('preset-file-content-preview');
+    const self = this;
+    const showFilePreview = (file) => { const reader = new FileReader(); reader.onload = (ev) => { const text = ev.target.result; previewContent.textContent = text.length > 5000 ? text.substring(0, 5000) + '\n\n... (обрезано)' : text; previewDiv.style.display = 'block'; }; reader.readAsText(file); };
+    const setFile = (file) => { if (!file) return; if (!file.name.toLowerCase().endsWith('.txt')) { self.toast('Допускаются только .txt файлы', 'error'); return; } if (file.size > 2 * 1024 * 1024) { self.toast('Максимальный размер файла — 2 МБ', 'error'); return; } selectedFile = file; fileNameEl.textContent = file.name + ' (' + (file.size < 1024 ? file.size + ' B' : (file.size/1024).toFixed(1) + ' KB') + ')'; placeholder.style.display = 'none'; selectedDiv.style.display = 'flex'; showFilePreview(file); };
+    fileDrop.addEventListener('click', (e) => { if (e.target.id !== 'preset-file-remove') fileInput.click(); });
+    fileInput.addEventListener('change', () => { if (fileInput.files.length > 0) setFile(fileInput.files[0]); });
+    fileDrop.addEventListener('dragover', (e) => { e.preventDefault(); fileDrop.classList.add('dragover'); });
+    fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('dragover'));
+    fileDrop.addEventListener('drop', (e) => { e.preventDefault(); fileDrop.classList.remove('dragover'); if (e.dataTransfer.files.length > 0) setFile(e.dataTransfer.files[0]); });
+    document.getElementById('preset-file-remove').addEventListener('click', (e) => { e.stopPropagation(); selectedFile = null; fileInput.value = ''; placeholder.style.display = 'flex'; selectedDiv.style.display = 'none'; previewDiv.style.display = 'none'; });
+    document.getElementById('submit-preset-btn').addEventListener('click', async () => {
+      const title = document.getElementById('preset-title').value.trim();
+      const description = document.getElementById('preset-description').value.trim();
+      if (!title) { self.toast('Введите название пресета', 'error'); return; }
+      if (!selectedFile) { self.toast('Прикрепите .txt файл', 'error'); return; }
+      const formData = new FormData(); formData.append('title', title); formData.append('description', description); formData.append('file', selectedFile);
+      try { const btn = document.getElementById('submit-preset-btn'); btn.disabled = true; btn.textContent = 'Публикация...'; await self.api('POST', '/api/presets', formData, true); self.toast('Пресет опубликован!', 'success'); closeModal(); self.renderPresetsView(document.getElementById('content')); } catch (e) { self.toast('Ошибка: ' + e.message, 'error'); const btn = document.getElementById('submit-preset-btn'); if (btn) { btn.disabled = false; btn.textContent = 'Опубликовать'; } }
+    });
+  },
+  // ========== Preset Detail View ==========
+  async renderPresetDetailView(container, data) {
+    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    const id = data?.id || this._pendingPresetId;
+    if (!id) { this.navigate('presets'); return; }
+    try {
+      const preset = await this.api('GET', '/api/presets/' + id);
+      let fileContent = null;
+      try { const fc = await this.api('GET', '/api/presets/' + id + '/content'); fileContent = fc.content; } catch {}
+      const esc = (s) => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+      const formatDate = (d) => { if (!d) return ''; const dt = new Date(d + (d.includes('T') ? '' : 'T00:00:00')); return dt.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); };
+      const formatSize = (bytes) => { if (!bytes) return '0 B'; if (bytes < 1024) return bytes + ' B'; if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB'; return (bytes/1024/1024).toFixed(1) + ' MB'; };
+      const authorName = preset.author_username ? '@' + esc(preset.author_username) : esc(preset.author_first_name);
+      const avatarHtml = preset.author_photo ? '<img src="' + esc(preset.author_photo) + '" class="avatar-md" alt="">' : '<div class="avatar-md avatar-placeholder">' + esc((preset.author_first_name || '?')[0]) + '</div>';
+      const canEdit = this.user.is_admin || this.user.id === preset.author_id;
+      const commentsHtml = (preset.comments || []).map(c => {
+        const cAuthor = c.author_username ? '@' + esc(c.author_username) : esc(c.author_first_name);
+        const cAvatar = c.author_photo ? '<img src="' + esc(c.author_photo) + '" class="avatar-sm" alt="">' : '<div class="avatar-sm avatar-placeholder">' + esc((c.author_first_name || '?')[0]) + '</div>';
+        const canDel = this.user.is_admin || this.user.id === c.author_id;
+        return '<div class="preset-comment" data-comment-id="' + c.id + '"><div class="preset-comment-header"><span class="preset-comment-author">' + cAvatar + ' ' + cAuthor + (c.author_is_admin ? ' <span class="admin-badge">Админ</span>' : '') + '</span><span class="preset-comment-date">' + formatDate(c.created_at) + '</span>' + (canDel ? '<button class="btn-icon preset-comment-delete" data-delete-comment="' + c.id + '" title="Удалить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg></button>' : '') + '</div><div class="preset-comment-body">' + renderMarkdown(c.content) + '</div></div>';
+      }).join('');
+      container.innerHTML = '<div class="preset-detail-view"><div class="preset-detail-nav"><button class="btn btn-sm" id="preset-back-btn">&larr; Все пресеты</button></div><div class="preset-detail-header"><div class="preset-detail-title-row"><h1>' + esc(preset.title) + '</h1>' + (canEdit ? '<div class="preset-detail-actions"><button class="btn btn-sm" id="preset-edit-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Редактировать</button><button class="btn btn-sm btn-danger" id="preset-delete-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg> Удалить</button></div>' : '') + '</div><div class="preset-detail-meta"><span class="preset-detail-author">' + avatarHtml + ' ' + authorName + '</span><span class="preset-detail-date">Опубликован: ' + formatDate(preset.created_at) + '</span><span class="preset-detail-stats"><span title="Скачивания">&#11015; ' + (preset.download_count || 0) + '</span><span title="Комментарии">&#128172; ' + (preset.comment_count || 0) + '</span></span></div>' + (preset.description ? '<div class="preset-detail-desc">' + renderMarkdown(preset.description) + '</div>' : '') + '</div><div class="preset-detail-file"><div class="preset-detail-file-header"><div class="preset-detail-file-info"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> <span>' + esc(preset.original_name) + ' (' + formatSize(preset.file_size) + ')</span></div><button class="btn btn-primary btn-sm" id="preset-download-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Скачать</button></div>' + (fileContent !== null ? '<div class="preset-detail-file-content"><div class="preset-file-content-toolbar"><span>Содержимое файла</span><button class="btn btn-sm" id="preset-copy-content"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Копировать</button></div><pre class="preset-file-content">' + esc(fileContent.length > 10000 ? fileContent.substring(0, 10000) + '\n\n... (обрезано)' : fileContent) + '</pre></div>' : '<p style="color:var(--text-muted);padding:12px">Не удалось загрузить содержимое файла</p>') + '</div><div class="preset-detail-comments"><h2>Комментарии (' + (preset.comments || []).length + ')</h2><div class="preset-comments-list" id="preset-comments-list">' + (commentsHtml || '<div class="empty-state" style="padding:24px"><p>Комментариев пока нет</p></div>') + '</div><div class="preset-comment-form"><textarea class="input" id="preset-comment-input" rows="3" placeholder="Написать комментарий... (поддерживается Markdown)"></textarea><button class="btn btn-primary" id="preset-comment-submit">Отправить</button></div></div></div>';
+      this.bindPresetDetailView(preset);
+    } catch (e) {
+      container.innerHTML = '<div class="empty-state"><h3>Ошибка</h3><p>' + e.message + '</p><button class="btn" id="preset-back-err">Назад к пресетам</button></div>';
+      document.getElementById('preset-back-err')?.addEventListener('click', () => { location.hash = ''; this.navigate('presets'); });
+    }
+  },
+  bindPresetDetailView(preset) {
+    document.getElementById('preset-back-btn')?.addEventListener('click', () => { location.hash = ''; this.navigate('presets'); });
+    document.getElementById('preset-download-btn')?.addEventListener('click', async () => {
+      try { const res = await fetch('/api/presets/' + preset.id + '/download', { headers: { 'Authorization': 'Bearer ' + this.token } }); if (!res.ok) throw new Error('Download failed'); const blob = await res.blob(); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = preset.original_name; a.click(); URL.revokeObjectURL(url); } catch (e) { this.toast('Ошибка скачивания: ' + e.message, 'error'); }
+    });
+    document.getElementById('preset-copy-content')?.addEventListener('click', async () => {
+      const pre = document.querySelector('.preset-detail-file-content .preset-file-content');
+      if (pre) { try { await navigator.clipboard.writeText(pre.textContent); this.toast('Содержимое скопировано!', 'success'); } catch { this.toast('Не удалось скопировать', 'error'); } }
+    });
+    document.getElementById('preset-edit-btn')?.addEventListener('click', () => {
+      const title = prompt('Название:', preset.title); if (title === null) return;
+      const description = prompt('Описание:', preset.description || ''); if (description === null) return;
+      this.api('PUT', '/api/presets/' + preset.id, { title: title.trim(), description: description.trim() }).then(() => { this.toast('Пресет обновлён', 'success'); this.renderPresetDetailView(document.getElementById('content'), { id: preset.id }); }).catch(e => this.toast('Ошибка: ' + e.message, 'error'));
+    });
+    document.getElementById('preset-delete-btn')?.addEventListener('click', async () => {
+      if (!confirm('Удалить этот пресет? Это действие необратимо.')) return;
+      try { await this.api('DELETE', '/api/presets/' + preset.id); this.toast('Пресет удалён', 'success'); location.hash = ''; this.navigate('presets'); } catch (e) { this.toast('Ошибка: ' + e.message, 'error'); }
+    });
+    document.getElementById('preset-comment-submit')?.addEventListener('click', async () => {
+      const input = document.getElementById('preset-comment-input'); const content = input?.value?.trim();
+      if (!content) { this.toast('Введите текст комментария', 'error'); return; }
+      try { await this.api('POST', '/api/presets/' + preset.id + '/comments', { content }); input.value = ''; this.toast('Комментарий добавлен', 'success'); this.renderPresetDetailView(document.getElementById('content'), { id: preset.id }); } catch (e) { this.toast('Ошибка: ' + e.message, 'error'); }
+    });
+    document.querySelectorAll('[data-delete-comment]').forEach(btn => {
+      btn.addEventListener('click', async (e) => { e.stopPropagation(); if (!confirm('Удалить комментарий?')) return; try { await this.api('DELETE', '/api/preset-comments/' + btn.dataset.deleteComment); this.toast('Комментарий удалён', 'success'); this.renderPresetDetailView(document.getElementById('content'), { id: preset.id }); } catch (err) { this.toast('Ошибка: ' + err.message, 'error'); } });
+    });
+  },
+
   // ========== Admin Panel View ==========
   async renderAdminView(container) {
     if (!this.user || !this.user.is_admin) {
@@ -3719,7 +3876,7 @@ function filterOversizedFiles(files, toastFn) {
 }
 
 function getAttachmentName(file, idx = 0) {
-  return file?._preferredName || file?.name || `attachment-${Date.now()}-${idx}.png`;
+  return file?._preferredName || file?.original_name || file?.name || `attachment-${Date.now()}-${idx}.png`;
 }
 
 function makePastedImageFile(blob, ts, idx) {

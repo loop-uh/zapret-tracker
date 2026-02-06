@@ -1343,7 +1343,11 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
   // Public tickets: anyone can comment (no extra restrictions)
 
   const content = req.body.content;
-  if (!content && (!req.files || req.files.length === 0)) {
+  // Parse proxied files (already downloaded via /api/gif-proxy)
+  let proxiedFiles = [];
+  try { proxiedFiles = JSON.parse(req.body.proxied_files || '[]'); } catch {}
+
+  if (!content && (!req.files || req.files.length === 0) && proxiedFiles.length === 0) {
     return res.status(400).json({ error: 'Content or files required' });
   }
 
@@ -1353,9 +1357,10 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
     content: content || '',
   });
 
-  // Handle file attachments
+  message.attachments = [];
+
+  // Handle file attachments (uploaded via multer)
   if (req.files && req.files.length > 0) {
-    message.attachments = [];
     for (const file of req.files) {
       const attachment = db.addAttachment({
         ticket_id: ticketId,
@@ -1367,6 +1372,23 @@ app.post('/api/tickets/:id/messages', authMiddleware, upload.array('files', 10),
       });
       message.attachments.push(attachment);
     }
+  }
+
+  // Handle proxied files (already on disk from /api/gif-proxy)
+  for (const pf of proxiedFiles) {
+    if (!pf.filename || !pf.original_name) continue;
+    // Verify the file actually exists on disk
+    const filePath = path.join(CONFIG.uploadDir, pf.filename);
+    if (!fs.existsSync(filePath)) continue;
+    const attachment = db.addAttachment({
+      ticket_id: ticketId,
+      message_id: message.id,
+      filename: pf.filename,
+      original_name: pf.original_name,
+      mime_type: pf.mime_type || 'image/gif',
+      size: pf.size || 0,
+    });
+    message.attachments.push(attachment);
   }
 
   // New message has no reactions yet
@@ -1550,6 +1572,61 @@ app.post('/api/tickets/:id/unsubscribe', authMiddleware, (req, res) => {
   const ticketId = parseInt(req.params.id);
   db.unsubscribe(req.user.id, ticketId);
   res.json({ subscribed: false });
+});
+
+// --- GIF Proxy (download external GIF and save as local upload) ---
+
+app.post('/api/gif-proxy', authMiddleware, async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // Allow only known GIF hosting domains
+    const allowedHosts = ['media.tenor.com', 'media1.tenor.com', 'c.tenor.com', 'media.giphy.com', 'i.giphy.com'];
+    let parsed;
+    try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    if (!allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
+      return res.status(400).json({ error: 'Domain not allowed' });
+    }
+
+    const fetch = require('node-fetch');
+    const resp = await fetch(url, { timeout: 10000, size: CONFIG.maxFileSize });
+    if (!resp.ok) return res.status(502).json({ error: 'Failed to fetch GIF' });
+
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      return res.status(400).json({ error: 'Not an image' });
+    }
+
+    const buffer = await resp.buffer();
+    if (buffer.length > CONFIG.maxFileSize) {
+      return res.status(400).json({ error: 'File too large' });
+    }
+
+    // Determine extension from content-type
+    let ext = '.gif';
+    if (contentType.includes('webp')) ext = '.webp';
+    else if (contentType.includes('png')) ext = '.png';
+    else if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = '.jpg';
+
+    const filename = crypto.randomBytes(16).toString('hex') + ext;
+    const filePath = path.join(CONFIG.uploadDir, filename);
+
+    if (!fs.existsSync(CONFIG.uploadDir)) fs.mkdirSync(CONFIG.uploadDir, { recursive: true });
+    fs.writeFileSync(filePath, buffer);
+
+    res.json({
+      filename,
+      original_name: 'gif' + ext,
+      mime_type: contentType.split(';')[0].trim(),
+      size: buffer.length,
+    });
+  } catch (e) {
+    console.error('GIF proxy error:', e.message);
+    res.status(500).json({ error: 'Failed to download GIF' });
+  }
 });
 
 // --- Tags ---
