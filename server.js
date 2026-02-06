@@ -198,15 +198,18 @@ async function handleBotUpdate(update) {
         return;
       }
 
-      // Get user profile photos
+      // Get user profile photos — download and store locally
       let photoUrl = null;
       try {
         const photos = await tgApi('getUserProfilePhotos', { user_id: userId, limit: 1 });
         if (photos && photos.total_count > 0) {
-          const fileId = photos.photos[0][0].file_id;
+          const fileId = photos.photos[0][photos.photos[0].length - 1].file_id;
           const file = await tgApi('getFile', { file_id: fileId });
           if (file) {
-            photoUrl = `https://api.telegram.org/file/bot${CONFIG.botToken}/${file.file_path}`;
+            const localPath = await downloadTgPhoto(file.file_path, userId);
+            if (localPath) {
+              photoUrl = localPath;
+            }
           }
         }
       } catch {}
@@ -278,6 +281,58 @@ async function handleBotUpdate(update) {
       `/help — Помощь`,
       { reply_markup: replyMarkup }
     );
+  }
+}
+
+// ========== Photo Download ==========
+
+async function downloadTgPhoto(filePath, telegramId) {
+  if (!CONFIG.botToken || !filePath) return null;
+  const fetch = require('node-fetch');
+  try {
+    const url = `https://api.telegram.org/file/bot${CONFIG.botToken}/${filePath}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+
+    const ext = path.extname(filePath) || '.jpg';
+    const filename = `avatar_${telegramId}${ext}`;
+    const destPath = path.join(CONFIG.uploadDir, filename);
+
+    if (!fs.existsSync(CONFIG.uploadDir)) fs.mkdirSync(CONFIG.uploadDir, { recursive: true });
+
+    const buffer = await res.buffer();
+    fs.writeFileSync(destPath, buffer);
+    return `/uploads/${filename}`;
+  } catch (e) {
+    console.error('Failed to download TG photo:', e.message);
+    return null;
+  }
+}
+
+// Periodically refresh user avatars (every 6 hours)
+async function refreshUserAvatars() {
+  if (!CONFIG.botToken) return;
+  try {
+    const users = db.getDb().prepare('SELECT * FROM users WHERE telegram_id IS NOT NULL').all();
+    for (const user of users) {
+      try {
+        const photos = await tgApi('getUserProfilePhotos', { user_id: user.telegram_id, limit: 1 });
+        if (photos && photos.total_count > 0) {
+          const fileId = photos.photos[0][photos.photos[0].length - 1].file_id;
+          const file = await tgApi('getFile', { file_id: fileId });
+          if (file) {
+            const localPath = await downloadTgPhoto(file.file_path, user.telegram_id);
+            if (localPath && localPath !== user.photo_url) {
+              db.getDb().prepare('UPDATE users SET photo_url = ? WHERE id = ?').run(localPath, user.id);
+            }
+          }
+        }
+      } catch {}
+      // Rate limit: wait 100ms between users
+      await new Promise(r => setTimeout(r, 100));
+    }
+  } catch (e) {
+    console.error('Avatar refresh error:', e.message);
   }
 }
 
@@ -353,19 +408,33 @@ function verifyWebAppData(initData) {
 // --- Auth ---
 
 // WebApp auth — instant, no polling, Telegram verifies the user
-app.post('/api/auth/webapp', (req, res) => {
+app.post('/api/auth/webapp', async (req, res) => {
   const { initData } = req.body;
   if (!initData) return res.status(400).json({ error: 'Missing initData' });
 
   const tgUser = verifyWebAppData(initData);
   if (!tgUser) return res.status(403).json({ error: 'Invalid WebApp data' });
 
+  // Try to download user's avatar locally
+  let photoUrl = tgUser.photo_url || null;
+  try {
+    const photos = await tgApi('getUserProfilePhotos', { user_id: tgUser.id, limit: 1 });
+    if (photos && photos.total_count > 0) {
+      const fileId = photos.photos[0][photos.photos[0].length - 1].file_id;
+      const file = await tgApi('getFile', { file_id: fileId });
+      if (file) {
+        const localPath = await downloadTgPhoto(file.file_path, tgUser.id);
+        if (localPath) photoUrl = localPath;
+      }
+    }
+  } catch {}
+
   const user = db.findOrCreateUser({
     id: tgUser.id,
     username: tgUser.username,
     first_name: tgUser.first_name || 'User',
     last_name: tgUser.last_name,
-    photo_url: tgUser.photo_url,
+    photo_url: photoUrl,
     chat_id: null, // chat_id comes from bot /start, not webapp
   });
 
@@ -447,9 +516,11 @@ app.post('/api/auth/logout', authMiddleware, (req, res) => {
 // --- Tickets ---
 
 app.get('/api/tickets', authMiddleware, (req, res) => {
-  const { status, type, priority, author_id, search, tag_id, page } = req.query;
+  const { status, type, priority, author_id, search, tag_id, page, is_resource_request, sort, group_by } = req.query;
   const result = db.getTickets({
     status, type, priority, author_id, search, tag_id,
+    is_resource_request: is_resource_request !== undefined ? parseInt(is_resource_request) : undefined,
+    sort: sort || undefined,
     page: parseInt(page) || 1,
     is_admin: req.user.is_admin,
     user_id: req.user.id,
@@ -978,6 +1049,9 @@ app.listen(CONFIG.port, CONFIG.host, () => {
   if (CONFIG.botToken) {
     console.log(`Bot: @${CONFIG.botUsername}`);
     startBotPolling();
+    // Refresh avatars on startup and every 6 hours
+    setTimeout(() => refreshUserAvatars(), 10000);
+    setInterval(() => refreshUserAvatars(), 6 * 60 * 60 * 1000);
   } else {
     console.log('WARNING: BOT_TOKEN not set — dev mode (no Telegram auth, no notifications)');
   }

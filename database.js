@@ -366,7 +366,7 @@ function getTicketById(id) {
   return ticket;
 }
 
-function getTickets({ status, type, priority, author_id, is_admin, user_id, search, tag_id, page = 1, limit = 50 }) {
+function getTickets({ status, type, priority, author_id, is_admin, user_id, search, tag_id, is_resource_request, sort, page = 1, limit = 50 }) {
   const db = getDb();
   let where = [];
   let params = [];
@@ -400,11 +400,42 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
     where.push('EXISTS (SELECT 1 FROM ticket_tags tt WHERE tt.ticket_id = t.id AND tt.tag_id = ?)');
     params.push(tag_id);
   }
+  if (is_resource_request !== undefined) {
+    where.push('t.is_resource_request = ?');
+    params.push(is_resource_request ? 1 : 0);
+  }
 
   const whereClause = where.length > 0 ? 'WHERE ' + where.join(' AND ') : '';
   const offset = (page - 1) * limit;
 
   const total = db.prepare(`SELECT COUNT(*) as count FROM tickets t ${whereClause}`).get(...params).count;
+
+  // Determine sort order
+  let orderBy;
+  switch (sort) {
+    case 'newest':
+      orderBy = 't.created_at DESC';
+      break;
+    case 'oldest':
+      orderBy = 't.created_at ASC';
+      break;
+    case 'most_voted':
+      orderBy = 't.votes_count DESC, t.created_at DESC';
+      break;
+    case 'most_commented':
+      orderBy = 'message_count DESC, t.created_at DESC';
+      break;
+    case 'priority':
+      orderBy = `CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END, t.created_at DESC`;
+      break;
+    case 'updated':
+      orderBy = 't.updated_at DESC';
+      break;
+    default:
+      orderBy = `CASE t.status WHEN 'open' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'review' THEN 3 WHEN 'testing' THEN 4 WHEN 'closed' THEN 5 WHEN 'rejected' THEN 6 WHEN 'duplicate' THEN 7 END,
+      CASE t.priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END,
+      t.created_at DESC`;
+  }
 
   const tickets = db.prepare(`
     SELECT t.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo,
@@ -412,23 +443,7 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
     FROM tickets t
     JOIN users u ON t.author_id = u.id
     ${whereClause}
-    ORDER BY
-      CASE t.status
-        WHEN 'open' THEN 1
-        WHEN 'in_progress' THEN 2
-        WHEN 'review' THEN 3
-        WHEN 'testing' THEN 4
-        WHEN 'closed' THEN 5
-        WHEN 'rejected' THEN 6
-        WHEN 'duplicate' THEN 7
-      END,
-      CASE t.priority
-        WHEN 'critical' THEN 1
-        WHEN 'high' THEN 2
-        WHEN 'medium' THEN 3
-        WHEN 'low' THEN 4
-      END,
-      t.created_at DESC
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 
