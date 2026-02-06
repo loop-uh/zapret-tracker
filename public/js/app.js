@@ -1038,8 +1038,21 @@ const App = {
         <div class="ticket-body">
           <div>
             <div class="ticket-content">
-              <div class="ticket-description">${t.description ? esc(t.description) : '<span style="color:var(--text-muted)">Нет описания</span>'}</div>
-              ${attachmentsHtml ? `<div class="ticket-attachments">${attachmentsHtml}</div>` : ''}
+              <div class="ticket-description-wrap">
+                <div class="message-avatar">
+                  ${t.author_photo
+                    ? `<img src="${t.author_photo}" class="user-avatar" alt="">`
+                    : `<div class="user-avatar-placeholder">${(t.author_first_name || '?')[0].toUpperCase()}</div>`}
+                </div>
+                <div class="ticket-description-body">
+                  <div class="ticket-description-author">
+                    <span class="message-author">${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
+                    <span class="message-date">${timeAgo(t.created_at)}</span>
+                  </div>
+                  <div class="ticket-description">${t.description ? esc(t.description) : '<span style="color:var(--text-muted)">Нет описания</span>'}</div>
+                  ${attachmentsHtml ? `<div class="ticket-attachments">${attachmentsHtml}</div>` : ''}
+                </div>
+              </div>
             </div>
 
             <div class="messages-section">

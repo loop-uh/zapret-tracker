@@ -658,6 +658,20 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   padding: 24px;
 }
 
+.ticket-description-wrap {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.ticket-description-wrap .message-avatar { flex-shrink: 0; }
+.ticket-description-body { flex: 1; min-width: 0; }
+.ticket-description-author {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
 .ticket-description {
   font-size: 14px;
   line-height: 1.8;
