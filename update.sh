@@ -54,6 +54,7 @@ cp "$TMPDIR/database.js"  "$APP_DIR/"
 cp -r "$TMPDIR/public/"   "$APP_DIR/"
 cp "$TMPDIR/update.sh"    "$APP_DIR/"
 cp "$TMPDIR/install.sh"   "$APP_DIR/"
+cp "$TMPDIR/setup-domain.sh" "$APP_DIR/" 2>/dev/null || true
 
 # Не трогаем: .env, data/, uploads/, node_modules/
 rm -rf "$TMPDIR"

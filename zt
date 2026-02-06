@@ -14,6 +14,7 @@
 #   zt logs 50   — последние 50 строк
 #   zt backup    — бэкап базы
 #   zt env       — редактировать .env
+#   zt domain    — настроить DuckDNS + HTTPS (Mini App)
 # ============================================================
 
 APP_DIR="/opt/zapret-tracker"
@@ -153,6 +154,15 @@ case "${1}" in
     fi
     ;;
 
+  domain)
+    if [ "$EUID" -ne 0 ]; then echo -e "${RED}sudo zt domain${NC}"; exit 1; fi
+    if [ -f "$APP_DIR/setup-domain.sh" ]; then
+      bash "$APP_DIR/setup-domain.sh"
+    else
+      echo -e "${RED}Скрипт setup-domain.sh не найден в $APP_DIR${NC}"
+    fi
+    ;;
+
   *)
     echo -e "${CYAN}zt${NC} — Zapret Tracker CLI"
     echo ""
@@ -165,6 +175,7 @@ case "${1}" in
     echo -e "  ${GREEN}zt logs 50${NC}    Последние 50 строк лога"
     echo -e "  ${GREEN}zt backup${NC}     Бэкап базы данных"
     echo -e "  ${GREEN}zt env${NC}        Редактировать .env и перезапустить"
+    echo -e "  ${GREEN}zt domain${NC}     DuckDNS + HTTPS для Telegram Mini App"
     echo ""
     ;;
 

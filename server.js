@@ -125,10 +125,25 @@ async function startBotPolling() {
   // Set bot commands
   await tgApi('setMyCommands', {
     commands: [
-      { command: 'start', description: 'Авторизация / Старт' },
+      { command: 'start', description: 'Открыть трекер' },
       { command: 'help', description: 'Помощь' },
     ],
   });
+
+  // Set Menu Button (WebApp) — appears as a button near the message input
+  const isHttps = CONFIG.siteUrl.startsWith('https://');
+  if (isHttps) {
+    await tgApi('setChatMenuButton', {
+      menu_button: {
+        type: 'web_app',
+        text: 'Zapret Tracker',
+        web_app: { url: CONFIG.siteUrl },
+      },
+    });
+    console.log('WebApp menu button set');
+  } else {
+    console.log('SITE_URL is not HTTPS — WebApp menu button disabled (need domain + SSL)');
+  }
 
   pollLoop();
 }
@@ -212,26 +227,56 @@ async function handleBotUpdate(update) {
         `Вы будете получать уведомления о новых сообщениях в ваших тикетах.`
       );
     } else {
-      // Just /start without token
+      // Just /start without token — show WebApp button
       const siteUrl = CONFIG.siteUrl;
+      const isHttps = siteUrl.startsWith('https://');
+
+      const replyMarkup = isHttps ? {
+        inline_keyboard: [[{
+          text: '🛡 Открыть Zapret Tracker',
+          web_app: { url: siteUrl },
+        }]],
+      } : {
+        inline_keyboard: [[{
+          text: '🛡 Открыть Zapret Tracker',
+          url: siteUrl,
+        }]],
+      };
+
       await sendTgMessage(chatId,
         `Добро пожаловать в <b>Zapret Tracker</b>!\n\n` +
-        `Это бот для уведомлений трекера багов и идей проекта Zapret.\n\n` +
-        `Откройте сайт для работы с трекером:\n${siteUrl}\n\n` +
-        `Вы будете автоматически получать уведомления о:\n` +
-        `- Новых сообщениях в ваших тикетах\n` +
-        `- Изменениях статуса ваших тикетов\n` +
-        `- Новых сообщениях в тикетах, на которые вы подписаны`
+        `Трекер багов и идей проекта Zapret.\n\n` +
+        `Нажмите кнопку ниже чтобы открыть трекер${isHttps ? ' прямо в Telegram' : ''}.\n\n` +
+        `Уведомления:\n` +
+        `• Новые сообщения в ваших тикетах\n` +
+        `• Изменения статуса\n` +
+        `• Сообщения в тикетах, на которые вы подписаны`,
+        { reply_markup: replyMarkup }
       );
     }
   } else if (text === '/help') {
+    const siteUrl = CONFIG.siteUrl;
+    const isHttps = siteUrl.startsWith('https://');
+
+    const replyMarkup = isHttps ? {
+      inline_keyboard: [[{
+        text: '🛡 Открыть трекер',
+        web_app: { url: siteUrl },
+      }]],
+    } : {
+      inline_keyboard: [[{
+        text: '🛡 Открыть трекер',
+        url: siteUrl,
+      }]],
+    };
+
     await sendTgMessage(chatId,
       `<b>Zapret Tracker Bot</b>\n\n` +
-      `Этот бот отправляет уведомления о событиях в трекере.\n\n` +
-      `Для входа на сайт нажмите кнопку "Войти через Telegram" на ${CONFIG.siteUrl}\n\n` +
+      `Трекер багов и идей проекта Zapret.\n\n` +
       `Команды:\n` +
-      `/start — Авторизация\n` +
-      `/help — Помощь`
+      `/start — Открыть трекер\n` +
+      `/help — Помощь`,
+      { reply_markup: replyMarkup }
     );
   }
 }
@@ -248,13 +293,14 @@ async function notifySubscribers(ticketId, authorUserId, text) {
     if (!sub.chat_id) continue;
 
     try {
+      const ticketUrl = `${CONFIG.siteUrl}/#ticket-${ticketId}`;
+      const isHttps = CONFIG.siteUrl.startsWith('https://');
+      const btn = isHttps
+        ? { text: 'Открыть тикет', web_app: { url: ticketUrl } }
+        : { text: 'Открыть тикет', url: ticketUrl };
+
       await sendTgMessage(sub.chat_id, text, {
-        reply_markup: {
-          inline_keyboard: [[{
-            text: 'Открыть тикет',
-            url: `${CONFIG.siteUrl}/#ticket-${ticketId}`,
-          }]],
-        },
+        reply_markup: { inline_keyboard: [[btn]] },
       });
     } catch (e) {
       console.error(`Failed to notify user ${sub.id}:`, e.message);
@@ -270,11 +316,64 @@ async function notifyAdmin(text) {
   }
 }
 
+// ========== Telegram WebApp Auth ==========
+
+function verifyWebAppData(initData) {
+  if (!CONFIG.botToken) return null;
+
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
+  if (!hash) return null;
+  params.delete('hash');
+
+  // Sort and join
+  const dataCheckArr = [];
+  for (const [key, val] of [...params.entries()].sort()) {
+    dataCheckArr.push(`${key}=${val}`);
+  }
+  const dataCheckString = dataCheckArr.join('\n');
+
+  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(CONFIG.botToken).digest();
+  const computedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+  if (computedHash !== hash) return null;
+
+  // Parse user
+  try {
+    const userStr = params.get('user');
+    if (!userStr) return null;
+    return JSON.parse(userStr);
+  } catch {
+    return null;
+  }
+}
+
 // ========== API Routes ==========
 
 // --- Auth ---
 
-// Step 1: Frontend requests a login token
+// WebApp auth — instant, no polling, Telegram verifies the user
+app.post('/api/auth/webapp', (req, res) => {
+  const { initData } = req.body;
+  if (!initData) return res.status(400).json({ error: 'Missing initData' });
+
+  const tgUser = verifyWebAppData(initData);
+  if (!tgUser) return res.status(403).json({ error: 'Invalid WebApp data' });
+
+  const user = db.findOrCreateUser({
+    id: tgUser.id,
+    username: tgUser.username,
+    first_name: tgUser.first_name || 'User',
+    last_name: tgUser.last_name,
+    photo_url: tgUser.photo_url,
+    chat_id: null, // chat_id comes from bot /start, not webapp
+  });
+
+  const token = createSessionToken(user);
+  res.json({ token, user: sanitizeUser(user) });
+});
+
+// Deep-link auth (fallback for direct IP access)
 app.post('/api/auth/request', (req, res) => {
   const token = crypto.randomBytes(20).toString('hex');
   db.createAuthToken(token);
@@ -400,7 +499,20 @@ app.get('/api/tickets/:id', authMiddleware, (req, res) => {
 });
 
 app.post('/api/tickets', authMiddleware, (req, res) => {
-  const { title, description, type, priority, is_private, tags, emoji, color } = req.body;
+  const {
+    title,
+    description,
+    type,
+    priority,
+    is_private,
+    tags,
+    emoji,
+    color,
+    is_resource_request,
+    resource_protocol,
+    resource_ports,
+    resource_name,
+  } = req.body;
 
   if (!title || !type) {
     return res.status(400).json({ error: 'Title and type are required' });
@@ -414,6 +526,10 @@ app.post('/api/tickets', authMiddleware, (req, res) => {
     tags: tags || [],
     emoji: emoji || null,
     color: color || null,
+    is_resource_request: !!is_resource_request,
+    resource_protocol: resource_protocol || null,
+    resource_ports: resource_ports || null,
+    resource_name: resource_name || null,
   });
 
   // Notify admin about new ticket (if author is not admin)
@@ -476,6 +592,98 @@ app.delete('/api/tickets/:id', authMiddleware, (req, res) => {
 
   db.deleteTicket(parseInt(req.params.id));
   res.json({ ok: true });
+});
+
+// --- Resource Requests ---
+// Dedicated creation endpoint with strict validation:
+// - files are required
+// - protocol required (tcp/udp/tcp,udp)
+// - ports must be valid (single, range, comma list)
+
+app.post('/api/resource-requests', authMiddleware, upload.array('files', 20), (req, res) => {
+  const { resource_name, protocol, ports, message, is_private } = req.body;
+
+  if (!resource_name || !resource_name.trim()) {
+    return res.status(400).json({ error: 'Название ресурса обязательно' });
+  }
+
+  const normalizedProtocol = normalizeProtocol(protocol);
+  if (!normalizedProtocol) {
+    return res.status(400).json({ error: 'Укажите protocol: TCP, UDP или TCP,UDP' });
+  }
+
+  if (!isValidPorts(ports || '')) {
+    return res.status(400).json({
+      error: 'Неверный формат портов. Примеры: 443, 40000-65535, 443,444,3000-3010',
+    });
+  }
+
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'Нужно прикрепить хотя бы один файл (ipset/hostlist)' });
+  }
+
+  const cleanResourceName = resource_name.trim();
+  const cleanPorts = normalizePorts(ports);
+  const cleanMessage = (message || '').trim();
+
+  const description = [
+    `Запрос на добавление ресурса: ${cleanResourceName}`,
+    `Протокол: ${normalizedProtocol.toUpperCase()}`,
+    `Порты: ${cleanPorts}`,
+    cleanMessage ? '' : null,
+    cleanMessage || null,
+  ].filter(Boolean).join('\n');
+
+  const ticket = db.createTicket({
+    title: cleanResourceName,
+    resource_name: cleanResourceName,
+    description,
+    type: 'feature',
+    priority: 'medium',
+    is_private: is_private ? 1 : 0,
+    author_id: req.user.id,
+    tags: [],
+    emoji: '📦',
+    color: '#4da3ff',
+    is_resource_request: true,
+    resource_protocol: normalizedProtocol,
+    resource_ports: cleanPorts,
+  });
+
+  const initialMessage = db.addMessage({
+    ticket_id: ticket.id,
+    author_id: req.user.id,
+    content: cleanMessage || 'Заявка на добавление ресурса',
+  });
+
+  for (const file of req.files) {
+    db.addAttachment({
+      ticket_id: ticket.id,
+      message_id: initialMessage.id,
+      filename: file.filename,
+      original_name: file.originalname,
+      mime_type: file.mimetype,
+      size: file.size,
+    });
+  }
+
+  if (!req.user.is_admin) {
+    const authorName = req.user.username ? `@${req.user.username}` : req.user.first_name;
+    notifyAdmin(
+      `📦 Новый запрос ресурса: <b>${escHtml(cleanResourceName)}</b>\n` +
+      `Автор: ${authorName}\n` +
+      `Протокол: ${normalizedProtocol.toUpperCase()}\n` +
+      `Порты: ${escHtml(cleanPorts)}\n` +
+      `Файлов: ${req.files.length}`
+    );
+  }
+
+  const fullTicket = db.getTicketById(ticket.id);
+  fullTicket.messages = db.getMessages(ticket.id);
+  fullTicket.user_voted = false;
+  fullTicket.user_subscribed = db.isSubscribed(req.user.id, ticket.id);
+
+  res.json(fullTicket);
 });
 
 // --- Messages ---
@@ -617,6 +825,7 @@ app.get('/api/config', (req, res) => {
   res.json({
     botUsername: CONFIG.botUsername,
     hasBotToken: !!CONFIG.botToken,
+    siteUrl: CONFIG.siteUrl,
   });
 });
 
@@ -637,6 +846,45 @@ app.use((err, req, res, next) => {
 });
 
 // ========== Helpers ==========
+
+function normalizeProtocol(value) {
+  if (!value) return null;
+  const v = String(value).toLowerCase().replace(/\s+/g, '');
+  if (v === 'tcp') return 'tcp';
+  if (v === 'udp') return 'udp';
+  if (v === 'tcp,udp' || v === 'udp,tcp' || v === 'both') return 'tcp,udp';
+  return null;
+}
+
+function isValidPortNumber(n) {
+  const num = Number(n);
+  return Number.isInteger(num) && num >= 0 && num <= 65535;
+}
+
+function isValidPorts(input) {
+  if (!input || !String(input).trim()) return false;
+  const parts = String(input).split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return false;
+
+  for (const part of parts) {
+    if (part.includes('-')) {
+      const [a, b] = part.split('-').map(s => s.trim());
+      if (!a || !b || !isValidPortNumber(a) || !isValidPortNumber(b)) return false;
+      if (Number(a) > Number(b)) return false;
+    } else {
+      if (!isValidPortNumber(part)) return false;
+    }
+  }
+  return true;
+}
+
+function normalizePorts(input) {
+  return String(input)
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .join(',');
+}
 
 function sanitizeUser(user) {
   return {

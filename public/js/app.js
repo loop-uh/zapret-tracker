@@ -1,5 +1,9 @@
 // ========== Zapret Tracker Frontend ==========
 
+// Detect Telegram WebApp
+const TG = window.Telegram?.WebApp;
+const isTgWebApp = !!(TG && TG.initData && TG.initData.length > 0);
+
 const App = {
   token: localStorage.getItem('token'),
   user: null,
@@ -9,9 +13,30 @@ const App = {
   authPollInterval: null,
 
   async init() {
+    // Telegram WebApp setup
+    if (isTgWebApp) {
+      TG.ready();
+      TG.expand();
+      document.body.classList.add('tg-webapp');
+    }
+
     await this.loadConfig();
     await this.loadTags();
-    if (this.token) {
+
+    // Try WebApp auth first (instant, no polling)
+    if (isTgWebApp && !this.token) {
+      try {
+        const res = await this.api('POST', '/api/auth/webapp', { initData: TG.initData });
+        this.token = res.token;
+        this.user = res.user;
+        localStorage.setItem('token', res.token);
+      } catch {
+        // Fall through to existing token check
+      }
+    }
+
+    // Check existing session
+    if (this.token && !this.user) {
       try {
         const res = await this.api('GET', '/api/auth/me');
         this.user = res.user;
@@ -20,6 +45,7 @@ const App = {
         localStorage.removeItem('token');
       }
     }
+
     // Check hash-based navigation
     this.checkHash();
     this.render();
@@ -254,6 +280,10 @@ const App = {
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 2h3.5v12h-3.5V2zm5 0h3.5v8h-3.5V2zm5 0h3v10h-3V2z"/></svg>
               Канбан
             </button>
+            <button class="nav-btn ${this.currentView === 'resource' ? 'active' : ''}" data-nav="resource">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7l8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+              Запрос ресурсов
+            </button>
           </nav>
         </div>
         <div class="header-right">
@@ -303,6 +333,7 @@ const App = {
     switch (view) {
       case 'list': this.renderListView(content); break;
       case 'kanban': this.renderKanbanView(content); break;
+      case 'resource': this.renderResourceRequestView(content); break;
       case 'ticket': this.renderTicketView(content, data); break;
       default: this.renderListView(content);
     }
@@ -570,6 +601,148 @@ const App = {
         </div>
       </div>
     `;
+  },
+
+  // ========== Resource Request View ==========
+  renderResourceRequestView(container) {
+    container.innerHTML = `
+      <div class="ticket-detail" style="max-width:820px">
+        <div class="ticket-content">
+          <h2 style="font-size:22px;margin-bottom:8px">Запрос ресурсов</h2>
+          <p style="color:var(--text-muted);margin-bottom:16px">
+            Для корректной обработки заявки обязательно укажите протокол, порты и прикрепите файлы (ipset/hostlist).
+          </p>
+
+          <div class="form-group">
+            <a class="btn" href="https://publish.obsidian.md/zapret/Zapret/%D0%A1%D0%BE%D0%B7%D0%B4%D0%B0%D0%BD%D0%B8%D0%B5+%D1%81%D0%B2%D0%BE%D0%B5%D0%B9+%D0%BA%D0%B0%D1%82%D0%B5%D0%B3%D0%BE%D1%80%D0%B8%D0%B8" target="_blank" rel="noopener noreferrer">
+              📘 Инструкция по созданию категории
+            </a>
+          </div>
+
+          <div class="form-group">
+            <label>Название ресурса *</label>
+            <input class="form-input" id="rr-name" placeholder="Например: Roblox">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Протокол *</label>
+              <select class="form-select" id="rr-protocol">
+                <option value="">Выберите протокол</option>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+                <option value="tcp,udp">TCP + UDP</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Порты *</label>
+              <input class="form-input" id="rr-ports" placeholder="443 или 40000-65535 или 443,444,3000-3010">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Описание запроса</label>
+            <textarea class="form-textarea" id="rr-message" placeholder="Опишите проверку, что уже тестировали, замечания..."></textarea>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Можно вставлять картинки через Ctrl+V</div>
+          </div>
+
+          <div class="form-group">
+            <label>Файлы (обязательно) *</label>
+            <input type="file" id="rr-files" multiple>
+            <div class="file-preview-list" id="rr-file-preview"></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-checkbox">
+              <input type="checkbox" id="rr-private">
+              Приватный запрос (видит только админ и вы)
+            </label>
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-primary" id="rr-submit">Отправить запрос</button>
+            <span style="font-size:12px;color:var(--text-muted)">Без файлов и валидных портов отправка запрещена</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const rrFiles = [];
+    const renderRrFiles = () => {
+      const box = document.getElementById('rr-file-preview');
+      box.innerHTML = rrFiles.map((f, i) => `
+        <div class="file-preview-item">
+          <span>${esc(f.name)}</span>
+          <span>(${formatSize(f.size)})</span>
+          <span class="remove-file" data-i="${i}">&times;</span>
+        </div>
+      `).join('');
+      box.querySelectorAll('.remove-file').forEach(x => x.addEventListener('click', () => {
+        rrFiles.splice(Number(x.dataset.i), 1);
+        renderRrFiles();
+      }));
+    };
+
+    const filesInput = document.getElementById('rr-files');
+    filesInput.addEventListener('change', (e) => {
+      for (const f of e.target.files) rrFiles.push(f);
+      e.target.value = '';
+      renderRrFiles();
+    });
+
+    // Paste images from clipboard (multiple)
+    const msgArea = document.getElementById('rr-message');
+    msgArea.addEventListener('paste', (e) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const imgs = items.filter(i => i.type.startsWith('image/'));
+      if (imgs.length === 0) return;
+      e.preventDefault();
+      const ts = Date.now();
+      let idx = 0;
+      for (const item of imgs) {
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        rrFiles.push(new File([blob], `pasted-${ts}-${idx++}.png`, { type: blob.type || 'image/png' }));
+      }
+      renderRrFiles();
+      this.toast(`Добавлено изображений: ${imgs.length}`, 'success');
+    });
+
+    document.getElementById('rr-submit').addEventListener('click', async () => {
+      const resource_name = document.getElementById('rr-name').value.trim();
+      const protocol = document.getElementById('rr-protocol').value;
+      const ports = document.getElementById('rr-ports').value.trim();
+      const message = document.getElementById('rr-message').value.trim();
+      const is_private = document.getElementById('rr-private').checked;
+
+      if (!resource_name) return this.toast('Укажите название ресурса', 'error');
+      if (!protocol) return this.toast('Укажите протокол', 'error');
+      if (!isValidPortsInput(ports)) return this.toast('Неверный формат портов', 'error');
+      if (rrFiles.length === 0) return this.toast('Нужно прикрепить хотя бы один файл', 'error');
+
+      const btn = document.getElementById('rr-submit');
+      btn.disabled = true;
+      btn.textContent = 'Отправка...';
+
+      try {
+        const fd = new FormData();
+        fd.append('resource_name', resource_name);
+        fd.append('protocol', protocol);
+        fd.append('ports', ports);
+        fd.append('message', message);
+        fd.append('is_private', is_private ? '1' : '0');
+        for (const f of rrFiles) fd.append('files', f);
+
+        const ticket = await this.api('POST', '/api/resource-requests', fd, true);
+        this.toast('Запрос отправлен', 'success');
+        location.hash = `ticket-${ticket.id}`;
+        this.navigate('ticket', { id: ticket.id });
+      } catch (e) {
+        this.toast(e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Отправить запрос';
+      }
+    });
   },
 
   // ========== Ticket Detail View ==========
@@ -878,6 +1051,25 @@ const App = {
       }
       this.renderFilePreview(selectedFiles);
       e.target.value = '';
+    });
+
+    // Paste images from clipboard (Ctrl+V), supports multiple
+    document.getElementById('message-input').addEventListener('paste', (e) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const images = items.filter(i => i.type.startsWith('image/'));
+      if (images.length === 0) return;
+
+      e.preventDefault();
+      const ts = Date.now();
+      let idx = 0;
+      for (const item of images) {
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        const ext = (blob.type || 'image/png').split('/')[1] || 'png';
+        selectedFiles.push(new File([blob], `pasted-${ts}-${idx++}.${ext}`, { type: blob.type || 'image/png' }));
+      }
+      this.renderFilePreview(selectedFiles);
+      this.toast(`Добавлено изображений: ${images.length}`, 'success');
     });
 
     // Send message
@@ -1254,6 +1446,26 @@ function formatSize(bytes) {
   let i = 0;
   while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
   return `${bytes.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function isValidPortsInput(input) {
+  if (!input || !input.trim()) return false;
+  const parts = input.split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return false;
+  for (const part of parts) {
+    if (part.includes('-')) {
+      const [a, b] = part.split('-').map(s => s.trim());
+      const n1 = Number(a);
+      const n2 = Number(b);
+      if (!Number.isInteger(n1) || !Number.isInteger(n2)) return false;
+      if (n1 < 0 || n1 > 65535 || n2 < 0 || n2 > 65535) return false;
+      if (n1 > n2) return false;
+    } else {
+      const n = Number(part);
+      if (!Number.isInteger(n) || n < 0 || n > 65535) return false;
+    }
+  }
+  return true;
 }
 
 // Global for Telegram widget compatibility

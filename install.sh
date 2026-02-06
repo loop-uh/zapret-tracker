@@ -54,6 +54,7 @@ fi
 echo -e "${YELLOW}[4/7] Deploying application...${NC}"
 mkdir -p "$APP_DIR"
 cp -r package.json server.js database.js public/ "$APP_DIR/"
+cp setup-domain.sh "$APP_DIR/" 2>/dev/null || true
 mkdir -p "$APP_DIR/uploads" "$APP_DIR/data"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 chmod -R 755 "$APP_DIR"

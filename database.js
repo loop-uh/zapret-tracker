@@ -53,10 +53,16 @@ function init() {
     CREATE TABLE IF NOT EXISTS tickets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
+      resource_name TEXT,
       description TEXT,
       type TEXT NOT NULL CHECK(type IN ('bug', 'idea', 'feature', 'improvement')),
+      is_resource_request INTEGER DEFAULT 0,
+      resource_protocol TEXT,
+      resource_ports TEXT,
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'in_progress', 'review', 'testing', 'closed', 'rejected', 'duplicate')),
       priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low', 'medium', 'high', 'critical')),
+      emoji TEXT,
+      color TEXT,
       is_private INTEGER DEFAULT 0,
       author_id INTEGER NOT NULL,
       assigned_to INTEGER,
@@ -166,6 +172,10 @@ function init() {
   const migrations = [
     "ALTER TABLE tickets ADD COLUMN emoji TEXT DEFAULT NULL",
     "ALTER TABLE tickets ADD COLUMN color TEXT DEFAULT NULL",
+    "ALTER TABLE tickets ADD COLUMN is_resource_request INTEGER DEFAULT 0",
+    "ALTER TABLE tickets ADD COLUMN resource_protocol TEXT DEFAULT NULL",
+    "ALTER TABLE tickets ADD COLUMN resource_ports TEXT DEFAULT NULL",
+    "ALTER TABLE tickets ADD COLUMN resource_name TEXT DEFAULT NULL",
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch {}
@@ -283,12 +293,39 @@ function updateUserChatId(telegramId, chatId) {
 
 // ========== Tickets ==========
 
-function createTicket({ title, description, type, priority, is_private, author_id, tags, emoji, color }) {
+function createTicket({
+  title,
+  description,
+  type,
+  priority,
+  is_private,
+  author_id,
+  tags,
+  emoji,
+  color,
+  is_resource_request,
+  resource_protocol,
+  resource_ports,
+  resource_name,
+}) {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO tickets (title, description, type, priority, is_private, author_id, emoji, color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(title, description || '', type, priority || 'medium', is_private ? 1 : 0, author_id, emoji || null, color || null);
+    INSERT INTO tickets (title, resource_name, description, type, is_resource_request, resource_protocol, resource_ports, priority, is_private, author_id, emoji, color)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    title,
+    resource_name || null,
+    description || '',
+    type,
+    is_resource_request ? 1 : 0,
+    resource_protocol || null,
+    resource_ports || null,
+    priority || 'medium',
+    is_private ? 1 : 0,
+    author_id,
+    emoji || null,
+    color || null,
+  );
 
   const ticketId = result.lastInsertRowid;
 
@@ -407,7 +444,7 @@ function getTickets({ status, type, priority, author_id, is_admin, user_id, sear
 
 function updateTicket(id, updates) {
   const db = getDb();
-  const allowed = ['title', 'description', 'type', 'status', 'priority', 'is_private', 'assigned_to', 'emoji', 'color'];
+  const allowed = ['title', 'description', 'type', 'status', 'priority', 'is_private', 'assigned_to', 'emoji', 'color', 'resource_name', 'resource_protocol', 'resource_ports'];
   const sets = [];
   const params = [];
 

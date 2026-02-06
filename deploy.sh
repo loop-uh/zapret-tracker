@@ -29,7 +29,7 @@ echo ""
 echo -e "${YELLOW}[1/2] Загрузка скриптов на сервер...${NC}"
 
 # Создаём минимальный пакет со скриптами
-tar czf /tmp/zt-deploy.tar.gz install.sh update.sh package.json server.js database.js public/
+tar czf /tmp/zt-deploy.tar.gz install.sh update.sh setup-domain.sh package.json server.js database.js public/
 
 scp -q /tmp/zt-deploy.tar.gz "${SERVER}:/tmp/"
 rm -f /tmp/zt-deploy.tar.gz

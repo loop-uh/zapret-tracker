@@ -1132,6 +1132,10 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
 .view-tab:hover { color: var(--text); }
 .view-tab.active { background: var(--accent); color: white; }
 
+/* ========== Telegram WebApp adjustments ========== */
+body.tg-webapp .header { padding-top: 8px; }
+body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
+
 /* ========== Responsive ========== */
 @media (max-width: 1024px) {
   .kanban-board { grid-template-columns: repeat(3, 1fr); }
