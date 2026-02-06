@@ -356,6 +356,10 @@ const App = {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
               Пользователи
             </button>
+            <button class="nav-btn ${this.currentView === 'settings' ? 'active' : ''}" data-nav="settings">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+              Настройки
+            </button>
             <div class="mobile-nav-extra">
               <button class="btn btn-primary" data-mobile-action="new-ticket" style="width:100%">+ Новый тикет</button>
               <div class="user-info" style="padding:8px 0">
@@ -468,6 +472,7 @@ const App = {
       case 'resource': this.renderResourceRequestView(content); break;
       case 'online': this.renderOnlineView(content); break;
       case 'users': this.renderUsersView(content); break;
+      case 'settings': this.renderSettingsView(content); break;
       case 'ticket': this.renderTicketView(content, data); break;
       default: this.renderListView(content);
     }
@@ -762,7 +767,6 @@ const App = {
             <div class="ticket-title-row">
               <span class="ticket-id">#${t.id}</span>
               <span class="ticket-title">${esc(t.title)}</span>
-              ${t.is_private ? '<span class="private-icon" title="Приватный">&#128274;</span>' : ''}
               <span class="ticket-tags">${tagsHtml}</span>
             </div>
             <div class="ticket-meta">
@@ -878,7 +882,6 @@ const App = {
         </div>
         <div class="kanban-card-footer">
           <span class="vote-btn ${t.user_voted ? 'voted' : ''}" style="font-size:11px;padding:2px 6px">&#9650; ${t.votes_count}</span>
-          ${t.is_private ? '<span class="private-icon" style="font-size:12px">&#128274;</span>' : ''}
           <span class="message-count" style="font-size:11px">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.75C1 1.78 1.78 1 2.75 1h10.5c.97 0 1.75.78 1.75 1.75v7.5A1.75 1.75 0 0113.25 12H9.06l-2.9 2.72A.75.75 0 015 14.25v-2.25H2.75A1.75 1.75 0 011 10.25v-7.5z"/></svg>
             ${t.message_count || 0}
@@ -1156,7 +1159,6 @@ const App = {
             ${ticketIcon(t)}
             <span id="ticket-title-text">${esc(t.title)}</span>
             ${canEdit ? '<button class="btn-icon" id="edit-title-btn" title="Редактировать" style="font-size:14px;margin-left:4px;opacity:.5">&#9998;</button>' : ''}
-            ${t.is_private ? '<span class="private-icon">&#128274;</span>' : ''}
           </h1>
           <div class="ticket-header-meta">
             <span class="ticket-status status-${t.status}">${statusLabel(t.status)}</span>

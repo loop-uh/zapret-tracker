@@ -474,6 +474,8 @@ function getTypingInTicket(ticketId, excludeUserId) {
       first_name: entry.user.first_name,
       username: entry.user.username,
       photo_url: entry.user.photo_url,
+      display_name: entry.user.display_name || null,
+      display_avatar: entry.user.display_avatar || null,
     });
   }
   if (map.size === 0) typingUsers.delete(ticketId);
@@ -502,6 +504,12 @@ function getOnlineList() {
     currentTicketId: e.currentTicketId || null,
     currentTicketTitle: e.currentTicketTitle || null,
     lastSeen: e.lastSeen,
+    // Privacy fields for filtering
+    privacy_hidden: !!e.user.privacy_hidden,
+    privacy_hide_online: !!e.user.privacy_hide_online,
+    privacy_hide_activity: !!e.user.privacy_hide_activity,
+    display_name: e.user.display_name || null,
+    display_avatar: e.user.display_avatar || null,
   }));
 }
 
@@ -825,6 +833,21 @@ app.put('/api/tickets/:id', authMiddleware, (req, res) => {
     delete updates.status;
     delete updates.assigned_to;
     delete updates.is_private;
+  }
+
+  // Log and notify on title change
+  if (updates.title && updates.title !== ticket.title) {
+    db.addMessage({
+      ticket_id: ticket.id,
+      author_id: req.user.id,
+      content: `Заголовок изменён: «${ticket.title}» → «${updates.title}»`,
+      is_system: true,
+    });
+
+    notifySubscribers(ticket.id, req.user.id,
+      `✏️ Заголовок тикета #${ticket.id} изменён\n` +
+      `«${escHtml(ticket.title)}» → «${escHtml(updates.title)}»`
+    );
   }
 
   // Log and notify on status change
@@ -1190,32 +1213,158 @@ app.post('/api/presence/typing', authMiddleware, (req, res) => {
 // Get who is typing in a specific ticket
 app.get('/api/presence/typing/:ticketId', authMiddleware, (req, res) => {
   const tid = parseInt(req.params.ticketId);
-  const typers = getTypingInTicket(tid, req.user.id);
+  const typers = getTypingInTicket(tid, req.user.id).map(u => ({
+    id: u.id,
+    first_name: u.display_name || u.first_name,
+    username: u.display_name ? null : u.username,
+    photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
+  }));
   res.json({ typing: typers });
 });
 
 // GET online users list (for initial load / non-SSE fallback)
 app.get('/api/presence/online', authMiddleware, (req, res) => {
-  const list = getOnlineList();
+  const raw = getOnlineList();
+  const isAdmin = !!req.user.is_admin;
+
+  const list = raw
+    .filter(u => {
+      if (isAdmin) return true;
+      if (u.privacy_hidden || u.privacy_hide_online) return false;
+      return true;
+    })
+    .map(u => {
+      const masked = {
+        id: u.id,
+        first_name: u.display_name || u.first_name,
+        username: u.display_name ? null : u.username,
+        photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
+        is_admin: u.is_admin,
+        currentView: u.privacy_hide_activity && !isAdmin ? null : u.currentView,
+        currentTicketId: u.privacy_hide_activity && !isAdmin ? null : u.currentTicketId,
+        currentTicketTitle: u.privacy_hide_activity && !isAdmin ? null : u.currentTicketTitle,
+        lastSeen: u.lastSeen,
+      };
+      // Admin extras
+      if (isAdmin && (u.display_name || u.display_avatar)) {
+        masked._real_first_name = u.first_name;
+        masked._real_username = u.username;
+        masked._real_photo_url = u.photo_url;
+        masked._privacy_hidden = u.privacy_hidden;
+        masked._privacy_hide_online = u.privacy_hide_online;
+        masked._privacy_hide_activity = u.privacy_hide_activity;
+      }
+      return masked;
+    });
+
   res.json({ users: list, count: list.length });
 });
 
 // GET all registered users
 app.get('/api/users', authMiddleware, (req, res) => {
   const users = db.getDb().prepare(`
-    SELECT id, telegram_id, username, first_name, last_name, photo_url, is_admin, created_at, last_login
+    SELECT id, telegram_id, username, first_name, last_name, photo_url, is_admin, created_at, last_login,
+           privacy_hidden, privacy_hide_online, privacy_hide_activity, display_name, display_avatar
     FROM users ORDER BY last_login DESC
   `).all();
 
-  // Enrich with online status
-  const onlineIds = new Set(getOnlineList().map(u => u.id));
-  const result = users.map(u => ({
-    ...u,
-    is_admin: !!u.is_admin,
-    is_online: onlineIds.has(u.id),
-  }));
+  const isAdmin = !!req.user.is_admin;
+  const onlineRaw = getOnlineList();
+  const onlineIds = new Set(onlineRaw.filter(u => {
+    if (isAdmin) return true;
+    return !u.privacy_hidden && !u.privacy_hide_online;
+  }).map(u => u.id));
+
+  const result = users
+    .filter(u => {
+      if (isAdmin) return true;
+      return !u.privacy_hidden;
+    })
+    .map(u => {
+      const entry = {
+        id: u.id,
+        first_name: u.display_name || u.first_name,
+        last_name: u.display_name ? null : u.last_name,
+        username: u.display_name ? null : u.username,
+        photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
+        is_admin: !!u.is_admin,
+        is_online: onlineIds.has(u.id),
+        created_at: u.created_at,
+        last_login: u.last_login,
+      };
+      if (isAdmin && (u.display_name || u.display_avatar || u.privacy_hidden || u.privacy_hide_online || u.privacy_hide_activity)) {
+        entry._real_first_name = u.first_name;
+        entry._real_username = u.username;
+        entry._real_photo_url = u.photo_url;
+        entry._privacy_hidden = !!u.privacy_hidden;
+        entry._privacy_hide_online = !!u.privacy_hide_online;
+        entry._privacy_hide_activity = !!u.privacy_hide_activity;
+        entry._display_name = u.display_name;
+        entry._display_avatar = u.display_avatar;
+      }
+      return entry;
+    });
 
   res.json({ users: result, total: result.length });
+});
+
+// --- User Settings ---
+
+app.get('/api/settings', authMiddleware, (req, res) => {
+  const settings = db.getUserSettings(req.user.id);
+  const user = req.user;
+  res.json({
+    privacy_hidden: !!settings.privacy_hidden,
+    privacy_hide_online: !!settings.privacy_hide_online,
+    privacy_hide_activity: !!settings.privacy_hide_activity,
+    display_name: settings.display_name || '',
+    display_avatar: settings.display_avatar || '',
+    notify_own: !!settings.notify_own,
+    notify_subscribed: !!settings.notify_subscribed,
+    // Real data for reference
+    real_first_name: user.first_name,
+    real_username: user.username,
+    real_photo_url: user.photo_url,
+  });
+});
+
+app.put('/api/settings', authMiddleware, (req, res) => {
+  const { privacy_hidden, privacy_hide_online, privacy_hide_activity, display_name, display_avatar, notify_own, notify_subscribed } = req.body;
+  const updates = {};
+  if (privacy_hidden !== undefined) updates.privacy_hidden = privacy_hidden ? 1 : 0;
+  if (privacy_hide_online !== undefined) updates.privacy_hide_online = privacy_hide_online ? 1 : 0;
+  if (privacy_hide_activity !== undefined) updates.privacy_hide_activity = privacy_hide_activity ? 1 : 0;
+  if (display_name !== undefined) updates.display_name = display_name.trim() || null;
+  if (display_avatar !== undefined) updates.display_avatar = display_avatar.trim() || null;
+  if (notify_own !== undefined) updates.notify_own = notify_own ? 1 : 0;
+  if (notify_subscribed !== undefined) updates.notify_subscribed = notify_subscribed ? 1 : 0;
+
+  db.updateUserSettings(req.user.id, updates);
+  res.json({ ok: true });
+});
+
+// Upload custom avatar
+app.post('/api/settings/avatar', authMiddleware, upload.single('avatar'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file' });
+  const url = `/uploads/${req.file.filename}`;
+  db.updateUserSettings(req.user.id, { display_avatar: url });
+  res.json({ url });
+});
+
+// --- Messages Poll (live updates) ---
+
+app.get('/api/tickets/:id/messages/poll', authMiddleware, (req, res) => {
+  const ticketId = parseInt(req.params.id);
+  const afterId = parseInt(req.query.after) || 0;
+
+  const ticket = db.getTicketById(ticketId);
+  if (!ticket) return res.status(404).json({ error: 'Not found' });
+  if (ticket.is_private && !req.user.is_admin && ticket.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const messages = db.getMessagesSince(ticketId, afterId);
+  res.json({ messages });
 });
 
 // --- Config (public) ---
@@ -1341,6 +1490,35 @@ function sanitizeUser(user) {
     photo_url: user.photo_url,
     is_admin: !!user.is_admin,
     has_chat_id: !!user.chat_id,
+    // Privacy settings for frontend
+    privacy_hidden: !!user.privacy_hidden,
+    privacy_hide_online: !!user.privacy_hide_online,
+    privacy_hide_activity: !!user.privacy_hide_activity,
+    display_name: user.display_name || null,
+    display_avatar: user.display_avatar || null,
+  };
+}
+
+// Mask user data for public display based on privacy settings
+// viewerIsAdmin: the person LOOKING at this user is an admin
+function maskUserForPublic(user, viewerIsAdmin) {
+  // Admins always see real data (plus any fake data alongside)
+  if (viewerIsAdmin) {
+    return {
+      ...user,
+      _real_first_name: user.first_name,
+      _real_username: user.username,
+      _real_photo_url: user.photo_url,
+      first_name: user.display_name || user.first_name,
+      photo_url: user.display_avatar === 'hidden' ? null : (user.display_avatar || user.photo_url),
+    };
+  }
+  // Apply display_name / display_avatar
+  return {
+    ...user,
+    first_name: user.display_name || user.first_name,
+    username: user.display_name ? null : user.username, // hide username if custom name set
+    photo_url: user.display_avatar === 'hidden' ? null : (user.display_avatar || user.photo_url),
   };
 }
 

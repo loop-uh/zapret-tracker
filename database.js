@@ -176,6 +176,12 @@ function init() {
     "ALTER TABLE tickets ADD COLUMN resource_protocol TEXT DEFAULT NULL",
     "ALTER TABLE tickets ADD COLUMN resource_ports TEXT DEFAULT NULL",
     "ALTER TABLE tickets ADD COLUMN resource_name TEXT DEFAULT NULL",
+    // Privacy settings
+    "ALTER TABLE users ADD COLUMN privacy_hidden INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN privacy_hide_online INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN privacy_hide_activity INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT NULL",
+    "ALTER TABLE users ADD COLUMN display_avatar TEXT DEFAULT NULL",
   ];
   for (const sql of migrations) {
     try { db.exec(sql); } catch {}
@@ -627,6 +633,49 @@ function createTag(name, color) {
   return getDb().prepare('SELECT * FROM tags WHERE id = ?').get(result.lastInsertRowid);
 }
 
+// ========== User Settings ==========
+
+function getUserSettings(userId) {
+  return getDb().prepare(`
+    SELECT privacy_hidden, privacy_hide_online, privacy_hide_activity, display_name, display_avatar,
+           notify_own, notify_subscribed
+    FROM users WHERE id = ?
+  `).get(userId);
+}
+
+function updateUserSettings(userId, settings) {
+  const allowed = ['privacy_hidden', 'privacy_hide_online', 'privacy_hide_activity', 'display_name', 'display_avatar', 'notify_own', 'notify_subscribed'];
+  const sets = [];
+  const params = [];
+  for (const key of allowed) {
+    if (settings[key] !== undefined) {
+      sets.push(`${key} = ?`);
+      params.push(settings[key]);
+    }
+  }
+  if (sets.length === 0) return;
+  params.push(userId);
+  getDb().prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+// Get messages newer than a given message id for a ticket
+function getMessagesSince(ticketId, afterId) {
+  const db = getDb();
+  const messages = db.prepare(`
+    SELECT m.*, u.username as author_username, u.first_name as author_first_name, u.photo_url as author_photo, u.is_admin as author_is_admin
+    FROM messages m
+    JOIN users u ON m.author_id = u.id
+    WHERE m.ticket_id = ? AND m.id > ?
+    ORDER BY m.created_at ASC
+  `).all(ticketId, afterId);
+
+  const getAttachments = db.prepare('SELECT * FROM attachments WHERE message_id = ?');
+  for (const msg of messages) {
+    msg.attachments = getAttachments.all(msg.id);
+  }
+  return messages;
+}
+
 // ========== Stats ==========
 
 function getStats() {
@@ -687,6 +736,10 @@ module.exports = {
   // Tags
   getAllTags,
   createTag,
+  // User settings
+  getUserSettings,
+  updateUserSettings,
+  getMessagesSince,
   // Stats
   getStats,
 };
