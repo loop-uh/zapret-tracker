@@ -390,6 +390,65 @@ async function refreshUserAvatars() {
 
 // ========== Online Presence Tracking ==========
 
+// Track when each user's profile was last refreshed from Telegram: userId -> timestamp
+const profileRefreshTimes = new Map();
+const PROFILE_REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
+
+// Refresh a single user's profile (avatar + name) from Telegram
+async function refreshUserProfile(user) {
+  if (!CONFIG.botToken || !user.telegram_id) return user;
+
+  const now = Date.now();
+  const lastRefresh = profileRefreshTimes.get(user.id) || 0;
+  if (now - lastRefresh < PROFILE_REFRESH_INTERVAL) return user; // too soon
+
+  profileRefreshTimes.set(user.id, now);
+
+  try {
+    // Get fresh info via getChat (returns name, username, photo)
+    const chat = await tgApi('getChat', { chat_id: user.telegram_id });
+    if (!chat) return user;
+
+    const updates = {};
+    if (chat.first_name && chat.first_name !== user.first_name) updates.first_name = chat.first_name;
+    if ((chat.last_name || null) !== (user.last_name || null)) updates.last_name = chat.last_name || null;
+    if ((chat.username || null) !== (user.username || null)) updates.username = chat.username || null;
+
+    // Refresh avatar
+    try {
+      const photos = await tgApi('getUserProfilePhotos', { user_id: user.telegram_id, limit: 1 });
+      if (photos && photos.total_count > 0) {
+        const fileId = photos.photos[0][photos.photos[0].length - 1].file_id;
+        const file = await tgApi('getFile', { file_id: fileId });
+        if (file) {
+          const localPath = await downloadTgPhoto(file.file_path, user.telegram_id);
+          if (localPath && localPath !== user.photo_url) {
+            updates.photo_url = localPath;
+          }
+        }
+      }
+    } catch {}
+
+    // Apply updates to DB
+    if (Object.keys(updates).length > 0) {
+      const sets = [];
+      const params = [];
+      for (const [key, val] of Object.entries(updates)) {
+        sets.push(`${key} = ?`);
+        params.push(val);
+      }
+      params.push(user.id);
+      db.getDb().prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      console.log(`Profile refreshed for ${user.first_name} (${user.telegram_id}):`, Object.keys(updates).join(', '));
+      // Return updated user
+      return db.getUserById(user.id);
+    }
+  } catch (e) {
+    console.error(`Profile refresh error for user ${user.id}:`, e.message);
+  }
+  return user;
+}
+
 // In-memory store: { sessionToken: { user, currentView, currentTicketId, lastSeen, sseRes } }
 const onlineUsers = new Map();
 // SSE clients for presence broadcast
@@ -1068,12 +1127,15 @@ app.get('/api/presence/stream', authMiddleware, (req, res) => {
 });
 
 // Heartbeat: frontend sends current view every 15s
-app.post('/api/presence/heartbeat', authMiddleware, (req, res) => {
+app.post('/api/presence/heartbeat', authMiddleware, async (req, res) => {
   const { view, ticketId, ticketTitle } = req.body;
   const token = req.headers.authorization?.replace('Bearer ', '');
 
+  // Try to refresh user profile from Telegram (with cooldown)
+  const freshUser = await refreshUserProfile(req.user);
+
   onlineUsers.set(token, {
-    user: req.user,
+    user: freshUser,
     currentView: view || 'list',
     currentTicketId: ticketId || null,
     currentTicketTitle: ticketTitle || null,
