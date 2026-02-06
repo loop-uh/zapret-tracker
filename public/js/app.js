@@ -489,7 +489,7 @@ const App = {
     const content = document.getElementById('content');
     if (!content) return;
 
-    // Cleanup typing poll and message poll from previous ticket view
+    // Cleanup typing poll, message poll, and new-messages badge from previous ticket view
     if (this._typingPollInterval) {
       clearInterval(this._typingPollInterval);
       this._typingPollInterval = null;
@@ -498,6 +498,7 @@ const App = {
       clearInterval(this._messagePollInterval);
       this._messagePollInterval = null;
     }
+    document.getElementById('new-messages-badge')?.remove();
 
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[data-nav="${view}"]`)?.classList.add('active');
@@ -1324,9 +1325,9 @@ const App = {
 
     const attachmentsHtml = (t.attachments || []).map(a => {
       if (isImageAttachment(a)) {
-        return `<a href="/uploads/${a.filename}" target="_blank"><img src="/uploads/${a.filename}" class="attachment-preview" alt="${esc(a.original_name)}"></a>`;
+        return `<img src="/uploads/${a.filename}" class="attachment-preview lightbox-trigger" alt="${esc(a.original_name)}" style="cursor:zoom-in">`;
       }
-      return `<a href="/uploads/${a.filename}" target="_blank" class="attachment">&#128206; ${esc(a.original_name)}</a>`;
+      return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)}</a>`;
     }).join('');
 
     const canEdit = this.user.is_admin || t.author_id === this.user.id;
@@ -1667,10 +1668,14 @@ const App = {
             }
           }
           this.bindMessageActions(ticket);
-          // Auto-scroll if user is near bottom
-          const main = document.querySelector('.main');
-          if (main && (main.scrollHeight - main.scrollTop - main.clientHeight < 300)) {
+          // Auto-scroll only if user is near bottom (reading latest messages)
+          const docEl = document.documentElement;
+          const distanceFromBottom = docEl.scrollHeight - docEl.scrollTop - docEl.clientHeight;
+          if (distanceFromBottom < 300) {
             list.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+          } else if (addedNonSystem > 0) {
+            // User is reading history — show a non-intrusive "new messages" badge
+            this.showNewMessagesBadge(list);
           }
         }
       } catch {}
@@ -1763,6 +1768,8 @@ const App = {
   bindMessageActions(ticket) {
     // Edit message
     document.querySelectorAll('.msg-edit-btn').forEach(btn => {
+      if (btn._bound) return;
+      btn._bound = true;
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const msgId = btn.dataset.msgId;
@@ -1819,6 +1826,8 @@ const App = {
 
     // Delete message
     document.querySelectorAll('.msg-delete-btn').forEach(btn => {
+      if (btn._bound) return;
+      btn._bound = true;
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!confirm('Удалить это сообщение?')) return;
@@ -1851,9 +1860,9 @@ const App = {
 
     const attachmentsHtml = (m.attachments || []).map(a => {
       if (isImageAttachment(a)) {
-        return `<a href="/uploads/${a.filename}" target="_blank"><img src="/uploads/${a.filename}" class="attachment-preview" alt="${esc(a.original_name)}"></a>`;
+        return `<img src="/uploads/${a.filename}" class="attachment-preview lightbox-trigger" alt="${esc(a.original_name)}" style="cursor:zoom-in">`;
       }
-      return `<a href="/uploads/${a.filename}" target="_blank" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
+      return `<a href="/uploads/${a.filename}" target="_blank" rel="noopener noreferrer" class="attachment">&#128206; ${esc(a.original_name)} (${formatSize(a.size)})</a>`;
     }).join('');
 
     const canManage = this.user && (this.user.is_admin || m.author_id === this.user.id);
@@ -1902,6 +1911,28 @@ const App = {
         this.renderFilePreview(files);
       });
     });
+  },
+
+  showNewMessagesBadge(list) {
+    if (document.getElementById('new-messages-badge')) return; // already shown
+    const badge = document.createElement('button');
+    badge.id = 'new-messages-badge';
+    badge.className = 'new-messages-badge';
+    badge.textContent = 'Новые сообщения \u2193';
+    badge.addEventListener('click', () => {
+      list.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+      badge.remove();
+    });
+    // Remove badge automatically when user scrolls to bottom
+    const onScroll = () => {
+      const docEl = document.documentElement;
+      if (docEl.scrollHeight - docEl.scrollTop - docEl.clientHeight < 300) {
+        badge.remove();
+        window.removeEventListener('scroll', onScroll);
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    document.body.appendChild(badge);
   },
 
   renderTypingIndicator(typers) {
@@ -2985,17 +3016,56 @@ function isImageAttachment(att) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name);
 }
 
-// Broken image previews: fall back to a normal attachment link
+// Broken image previews: fall back to a text placeholder
 document.addEventListener('error', (e) => {
   const el = e.target;
   if (!el || el.tagName !== 'IMG') return;
   if (!el.classList || !el.classList.contains('attachment-preview')) return;
-  const a = el.closest('a');
-  if (!a) return;
   const name = el.getAttribute('alt') || 'attachment';
-  a.classList.add('attachment');
-  a.textContent = `\u{1F4CE} ${name}`;
+  const span = document.createElement('span');
+  span.className = 'attachment';
+  span.textContent = `\u{1F4CE} ${name}`;
+  el.replaceWith(span);
 }, true);
+
+// ========== Image Lightbox ==========
+(function() {
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  overlay.innerHTML = '<button class="lightbox-close" title="Close">&times;</button><img src="" alt="">';
+  document.body.appendChild(overlay);
+
+  const lbImg = overlay.querySelector('img');
+  const lbClose = overlay.querySelector('.lightbox-close');
+
+  function openLightbox(src) {
+    lbImg.src = src;
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+    lbImg.src = '';
+  }
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target === lbClose) closeLightbox();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay.classList.contains('active')) closeLightbox();
+  });
+
+  document.addEventListener('click', (e) => {
+    const img = e.target.closest('img.lightbox-trigger');
+    if (img) {
+      e.preventDefault();
+      openLightbox(img.src);
+    }
+  });
+})();
 
 function isValidPortsInput(input) {
   if (!input || !input.trim()) return false;

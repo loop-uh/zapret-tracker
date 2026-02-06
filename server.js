@@ -1350,6 +1350,12 @@ app.delete('/api/messages/:id', authMiddleware, (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
   }
 
+  // Delete attachment files from disk before removing DB records
+  const attachments = db.getDb().prepare('SELECT filename FROM attachments WHERE message_id = ?').all(msgId);
+  for (const a of attachments) {
+    safeUnlink(path.join(CONFIG.uploadDir, a.filename));
+  }
+
   db.deleteMessage(msgId);
   res.json({ ok: true });
 });
