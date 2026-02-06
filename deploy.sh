@@ -2,53 +2,68 @@
 set -e
 
 # ============================================================
-# Zapret Tracker - One-line Deploy to Server
-# Usage: ./deploy.sh [user@host]
+# Zapret Tracker — Deploy to Server
+#
+# Использование:
+#   ./deploy.sh                   — деплой на 88.210.52.47
+#   ./deploy.sh root@my-server    — деплой на свой сервер
+#   ./deploy.sh root@my-server install  — полная установка
 # ============================================================
 
 SERVER="${1:-root@88.210.52.47}"
-REMOTE_DIR="/tmp/zapret-tracker-deploy"
+ACTION="${2:-auto}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${YELLOW}Deploying Zapret Tracker to ${SERVER}...${NC}"
+echo -e "${CYAN}========================================${NC}"
+echo -e "${CYAN}  Zapret Tracker — Deploy${NC}"
+echo -e "${CYAN}========================================${NC}"
+echo -e "  Сервер: ${GREEN}${SERVER}${NC}"
+echo ""
 
-# Create archive
-echo -e "${YELLOW}Creating archive...${NC}"
-tar czf /tmp/zapret-tracker.tar.gz \
-  --exclude='node_modules' \
-  --exclude='data' \
-  --exclude='uploads/*.????????????????????????????????????' \
-  package.json server.js database.js public/ install.sh update.sh
+# ---- Upload update script and run ----
+echo -e "${YELLOW}[1/2] Загрузка скриптов на сервер...${NC}"
 
-# Upload
-echo -e "${YELLOW}Uploading to server...${NC}"
-scp /tmp/zapret-tracker.tar.gz "${SERVER}:/tmp/"
+# Создаём минимальный пакет со скриптами
+tar czf /tmp/zt-deploy.tar.gz install.sh update.sh package.json server.js database.js public/
 
-# Extract and install
-echo -e "${YELLOW}Installing on server...${NC}"
-ssh "$SERVER" << 'REMOTE'
+scp -q /tmp/zt-deploy.tar.gz "${SERVER}:/tmp/"
+rm -f /tmp/zt-deploy.tar.gz
+
+echo -e "${YELLOW}[2/2] Запуск на сервере...${NC}"
+echo ""
+
+ssh -t "$SERVER" << 'REMOTE_SCRIPT'
   set -e
-  mkdir -p /tmp/zapret-tracker-deploy
-  cd /tmp/zapret-tracker-deploy
-  tar xzf /tmp/zapret-tracker.tar.gz
+  
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  NC='\033[0m'
+
+  cd /tmp
+  mkdir -p zt-deploy && cd zt-deploy
+  tar xzf /tmp/zt-deploy.tar.gz
   chmod +x install.sh update.sh
 
-  if [ -d "/opt/zapret-tracker/data" ] && [ -f "/opt/zapret-tracker/data/tracker.db" ]; then
-    echo "Existing installation found, running update..."
+  if systemctl is-active --quiet zapret-tracker 2>/dev/null; then
+    echo -e "${GREEN}Сервис найден — обновление...${NC}"
+    bash update.sh
+  elif [ -d "/opt/zapret-tracker/data" ]; then
+    echo -e "${YELLOW}Установка найдена но сервис не запущен — обновление...${NC}"
     bash update.sh
   else
-    echo "Fresh installation..."
+    echo -e "${YELLOW}Первая установка...${NC}"
     bash install.sh
   fi
 
-  rm -rf /tmp/zapret-tracker-deploy /tmp/zapret-tracker.tar.gz
-REMOTE
+  cd /tmp && rm -rf zt-deploy zt-deploy.tar.gz
+REMOTE_SCRIPT
 
-rm -f /tmp/zapret-tracker.tar.gz
-
-echo -e "${GREEN}Deploy complete!${NC}"
-echo -e "Open: ${GREEN}http://88.210.52.47${NC}"
+echo ""
+echo -e "${GREEN}Deploy завершён!${NC}"
+echo -e "Сайт: ${CYAN}http://88.210.52.47${NC}"

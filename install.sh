@@ -192,6 +192,22 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 echo -e "${GREEN}  Nginx configured${NC}"
 
+# ========== Install zt CLI ==========
+echo -e "${YELLOW}Installing zt CLI...${NC}"
+if [ -f "zt" ]; then
+  cp zt /usr/local/bin/zt
+  chmod +x /usr/local/bin/zt
+  echo -e "${GREEN}  zt CLI installed${NC}"
+elif [ -f "$APP_DIR/zt" ]; then
+  cp "$APP_DIR/zt" /usr/local/bin/zt
+  chmod +x /usr/local/bin/zt
+  echo -e "${GREEN}  zt CLI installed${NC}"
+fi
+
+# Copy update script to app dir
+cp update.sh "$APP_DIR/update.sh" 2>/dev/null || true
+chmod +x "$APP_DIR/update.sh" 2>/dev/null || true
+
 # ========== Start ==========
 echo ""
 echo -e "${YELLOW}Starting Zapret Tracker...${NC}"
@@ -212,17 +228,19 @@ echo -e "${CYAN}============================================${NC}"
 echo ""
 echo -e "  URL:     ${GREEN}http://${SERVER_IP}${NC}"
 echo -e "  Config:  ${APP_DIR}/.env"
-echo -e "  Logs:    journalctl -u zapret-tracker -f"
 echo ""
-echo -e "  ${YELLOW}Управление:${NC}"
-echo -e "  systemctl start|stop|restart|status zapret-tracker"
+echo -e "  ${YELLOW}Управление (zt CLI):${NC}"
+echo -e "  ${GREEN}zt update${NC}     — обновить из GitHub"
+echo -e "  ${GREEN}zt restart${NC}    — перезапустить"
+echo -e "  ${GREEN}zt status${NC}     — статус"
+echo -e "  ${GREEN}zt logs${NC}       — логи (live)"
+echo -e "  ${GREEN}zt env${NC}        — редактировать .env"
+echo -e "  ${GREEN}zt backup${NC}     — бэкап базы"
 echo ""
 if [ -z "$BOT_TOKEN" ]; then
   echo -e "  ${YELLOW}Telegram бот не настроен!${NC}"
-  echo -e "  Для авторизации через Telegram:"
   echo -e "  1. Создайте бота через @BotFather"
-  echo -e "  2. Отредактируйте $APP_DIR/.env"
-  echo -e "  3. systemctl restart zapret-tracker"
+  echo -e "  2. sudo zt env  (вписать BOT_TOKEN и BOT_USERNAME)"
   echo ""
 fi
 echo -e "  ${YELLOW}Админ:${NC} Telegram ID 6483277608 = автоматический админ"
