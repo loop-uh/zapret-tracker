@@ -906,7 +906,30 @@ function normalizeMimeType(file) {
     '.csv': 'text/csv',
     '.zip': 'application/zip',
   };
-  return map[ext] || (mt || 'application/octet-stream');
+  if (map[ext]) return map[ext];
+
+  // Fallback: sniff first bytes from file content
+  try {
+    if (file.path) {
+      const fd = fs.openSync(file.path, 'r');
+      const buf = Buffer.alloc(16);
+      fs.readSync(fd, buf, 0, 16, 0);
+      fs.closeSync(fd);
+
+      // PNG
+      if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+      // JPEG
+      if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+      // GIF
+      if (buf.toString('ascii', 0, 6) === 'GIF87a' || buf.toString('ascii', 0, 6) === 'GIF89a') return 'image/gif';
+      // WEBP (RIFF....WEBP)
+      if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+      // BMP
+      if (buf.toString('ascii', 0, 2) === 'BM') return 'image/bmp';
+    }
+  } catch {}
+
+  return mt || 'application/octet-stream';
 }
 
 function sanitizeUser(user) {

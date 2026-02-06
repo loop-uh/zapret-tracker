@@ -672,8 +672,8 @@ const App = {
       const box = document.getElementById('rr-file-preview');
       box.innerHTML = rrFiles.map((f, i) => `
         <div class="file-preview-item">
-          <span>${esc(f.name)}</span>
-          <span>(${formatSize(f.size)})</span>
+          <span>${esc(getAttachmentName(f, i))}</span>
+          <span>(${formatSize(f.size || 0)})</span>
           <span class="remove-file" data-i="${i}">&times;</span>
         </div>
       `).join('');
@@ -702,7 +702,7 @@ const App = {
       for (const item of imgs) {
         const blob = item.getAsFile();
         if (!blob) continue;
-        rrFiles.push(new File([blob], `pasted-${ts}-${idx++}.png`, { type: blob.type || 'image/png' }));
+        rrFiles.push(makePastedImageFile(blob, ts, idx++));
       }
       renderRrFiles();
       this.toast(`Добавлено изображений: ${imgs.length}`, 'success');
@@ -731,7 +731,9 @@ const App = {
         fd.append('ports', ports);
         fd.append('message', message);
         fd.append('is_private', is_private ? '1' : '0');
-        for (const f of rrFiles) fd.append('files', f);
+        rrFiles.forEach((f, i) => {
+          fd.append('files', f, getAttachmentName(f, i));
+        });
 
         const ticket = await this.api('POST', '/api/resource-requests', fd, true);
         this.toast('Запрос отправлен', 'success');
@@ -1065,8 +1067,7 @@ const App = {
       for (const item of images) {
         const blob = item.getAsFile();
         if (!blob) continue;
-        const ext = (blob.type || 'image/png').split('/')[1] || 'png';
-        selectedFiles.push(new File([blob], `pasted-${ts}-${idx++}.${ext}`, { type: blob.type || 'image/png' }));
+        selectedFiles.push(makePastedImageFile(blob, ts, idx++));
       }
       this.renderFilePreview(selectedFiles);
       this.toast(`Добавлено изображений: ${images.length}`, 'success');
@@ -1083,9 +1084,9 @@ const App = {
 
       const formData = new FormData();
       formData.append('content', content);
-      for (const file of selectedFiles) {
-        formData.append('files', file);
-      }
+      selectedFiles.forEach((file, i) => {
+        formData.append('files', file, getAttachmentName(file, i));
+      });
 
       try {
         const msg = await this.api('POST', `/api/tickets/${ticket.id}/messages`, formData, true);
@@ -1150,8 +1151,8 @@ const App = {
     if (!container) return;
     container.innerHTML = files.map((f, i) => `
       <div class="file-preview-item">
-        <span>${esc(f.name)}</span>
-        <span>(${formatSize(f.size)})</span>
+        <span>${esc(getAttachmentName(f, i))}</span>
+        <span>(${formatSize(f.size || 0)})</span>
         <span class="remove-file" data-index="${i}">&times;</span>
       </div>
     `).join('');
@@ -1315,7 +1316,7 @@ const App = {
         const files = document.getElementById('create-files').files;
         if (files.length > 0) {
           const formData = new FormData();
-          for (const file of files) formData.append('files', file);
+          Array.from(files).forEach((file, i) => formData.append('files', file, getAttachmentName(file, i)));
           await this.api('POST', `/api/tickets/${ticket.id}/upload`, formData, true);
         }
 
@@ -1446,6 +1447,24 @@ function formatSize(bytes) {
   let i = 0;
   while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
   return `${bytes.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function getAttachmentName(file, idx = 0) {
+  return file?._preferredName || file?.name || `attachment-${Date.now()}-${idx}.png`;
+}
+
+function makePastedImageFile(blob, ts, idx) {
+  const extRaw = (blob?.type || 'image/png').split('/')[1] || 'png';
+  const ext = extRaw.replace(/[^a-zA-Z0-9]/g, '') || 'png';
+  const name = `pasted-${ts}-${idx}.${ext}`;
+
+  try {
+    return new File([blob], name, { type: blob.type || 'image/png' });
+  } catch {
+    // Fallback for environments where File constructor is limited
+    blob._preferredName = name;
+    return blob;
+  }
 }
 
 function isImageAttachment(att) {
