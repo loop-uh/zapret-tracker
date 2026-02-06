@@ -40,11 +40,21 @@ else
   echo -e "${GREEN}  БД не найдена (первый запуск?)${NC}"
 fi
 
-# ---- 2. Pull from git ----
-echo -e "${YELLOW}[2/5] Загрузка обновлений из GitHub...${NC}"
-TMPDIR=$(mktemp -d)
-git clone --depth 1 "$REPO" "$TMPDIR" 2>&1 | tail -1
-echo -e "${GREEN}  Код загружен${NC}"
+# ---- 2. Get source files ----
+echo -e "${YELLOW}[2/5] Загрузка обновлений...${NC}"
+
+# Check if we're running from a deploy directory (deploy.sh uploaded files)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/server.js" ] && [ -f "$SCRIPT_DIR/database.js" ] && [ -d "$SCRIPT_DIR/public" ]; then
+  # Use locally available files (from deploy.sh)
+  TMPDIR="$SCRIPT_DIR"
+  echo -e "${GREEN}  Используются локально загруженные файлы${NC}"
+else
+  # Fallback: clone from git
+  TMPDIR=$(mktemp -d)
+  git clone --depth 1 "$REPO" "$TMPDIR" 2>&1 | tail -1
+  echo -e "${GREEN}  Код загружен из GitHub${NC}"
+fi
 
 # ---- 3. Copy files ----
 echo -e "${YELLOW}[3/5] Обновление файлов...${NC}"
@@ -52,12 +62,14 @@ cp "$TMPDIR/package.json" "$APP_DIR/"
 cp "$TMPDIR/server.js"    "$APP_DIR/"
 cp "$TMPDIR/database.js"  "$APP_DIR/"
 cp -r "$TMPDIR/public/"   "$APP_DIR/"
-cp "$TMPDIR/update.sh"    "$APP_DIR/"
-cp "$TMPDIR/install.sh"   "$APP_DIR/"
-cp "$TMPDIR/setup-domain.sh" "$APP_DIR/" 2>/dev/null || true
+[ -f "$TMPDIR/update.sh" ] && cp "$TMPDIR/update.sh" "$APP_DIR/"
+[ -f "$TMPDIR/install.sh" ] && cp "$TMPDIR/install.sh" "$APP_DIR/"
+[ -f "$TMPDIR/setup-domain.sh" ] && cp "$TMPDIR/setup-domain.sh" "$APP_DIR/" 2>/dev/null || true
 
 # Не трогаем: .env, data/, uploads/, node_modules/
-rm -rf "$TMPDIR"
+if [ "$TMPDIR" != "$SCRIPT_DIR" ]; then
+  rm -rf "$TMPDIR"
+fi
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 echo -e "${GREEN}  Файлы обновлены${NC}"

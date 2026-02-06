@@ -2409,6 +2409,7 @@ const presetUpload = multer({
 
 // List presets
 app.get('/api/presets', authMiddleware, (req, res) => {
+  console.log('GET /api/presets hit, user:', req.user?.id);
   try {
     const { search, author_id, sort, page } = req.query;
     const result = db.getPresets({
@@ -2643,6 +2644,18 @@ function applyMaskToPresetAuthor(preset, viewer) {
     preset.author_photo = masked.photo_url;
   }
 }
+
+// ========== Global JSON error handler ==========
+// Ensures ALL unhandled errors return JSON, never HTML
+app.use((err, req, res, next) => {
+  console.error('Unhandled Express error:', err);
+  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+});
+
+// 404 handler for API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Route not found: ${req.method} ${req.originalUrl}` });
+});
 
 // ========== Cleanup interval ==========
 
