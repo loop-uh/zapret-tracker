@@ -655,6 +655,64 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   color: var(--text-muted);
 }
 
+/* Ticket author avatar in header meta */
+.ticket-author-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ticket-author-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--border-glow);
+  vertical-align: middle;
+}
+
+.ticket-author-avatar-placeholder {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0074e8, #4da3ff);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 10px;
+  color: white;
+  vertical-align: middle;
+}
+
+/* Ticket list author avatar */
+.ticket-meta-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ticket-meta-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid var(--border-glow);
+}
+
+.ticket-meta-avatar-placeholder {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0074e8, #4da3ff);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 9px;
+  color: white;
+}
+
 .ticket-body {
   display: grid;
   grid-template-columns: 1fr 280px;

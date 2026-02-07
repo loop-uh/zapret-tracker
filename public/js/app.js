@@ -970,7 +970,12 @@ const App = {
               <span class="ticket-tags">${tagsHtml}</span>
             </div>
             <div class="ticket-meta">
-              <span>${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
+              <span class="ticket-meta-author">
+                ${t.author_photo
+                  ? `<img src="${t.author_photo}" class="ticket-meta-avatar" alt="">`
+                  : `<div class="ticket-meta-avatar-placeholder">${(t.author_first_name || '?')[0].toUpperCase()}</div>`}
+                ${esc(t.author_first_name || t.author_username || 'Unknown')}
+              </span>
               <span>${timeAgo(t.created_at)}</span>
             </div>
           </div>
@@ -1521,7 +1526,12 @@ const App = {
             <span class="priority-badge priority-${t.priority}">${priorityLabel(t.priority)}</span>
             <span>${(() => { const ti = this.ticketTypes.find(tt => tt.key === t.type); return ti ? (ti.emoji ? ti.emoji + ' ' : '') + esc(ti.name) : (typeLabels[t.type] || t.type); })()}</span>
             <span>Создан ${timeAgo(t.created_at)}</span>
-            <span>от ${esc(t.author_first_name || t.author_username || 'Unknown')}</span>
+            <span class="ticket-author-info">
+              ${t.author_photo
+                ? `<img src="${t.author_photo}" class="ticket-author-avatar" alt="">`
+                : `<div class="ticket-author-avatar-placeholder">${(t.author_first_name || '?')[0].toUpperCase()}</div>`}
+              ${esc(t.author_first_name || t.author_username || 'Unknown')}
+            </span>
             <button class="vote-btn ${t.user_voted ? 'voted' : ''}" id="vote-btn" title="Голосовать за тикет"><span class="whale-emoji">🐳</span> ${t.votes_count}</button>
             ${tagsHtml}
           </div>
