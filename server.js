@@ -654,12 +654,17 @@ function getOnlineList() {
   const now = Date.now();
   const TIMEOUT = 60_000; // 60s — user considered offline after this
   const seen = new Map(); // deduplicate by user.id
+  const activeByUser = new Map(); // track if any session is active
   for (const [, entry] of onlineUsers) {
     if (now - entry.lastSeen > TIMEOUT) continue;
     // Keep the most recent entry per user
     const existing = seen.get(entry.user.id);
     if (!existing || entry.lastSeen > existing.lastSeen) {
       seen.set(entry.user.id, entry);
+    }
+    // User is active if ANY of their sessions is active
+    if (entry.active) {
+      activeByUser.set(entry.user.id, true);
     }
   }
   return Array.from(seen.values()).map(e => ({
@@ -671,6 +676,7 @@ function getOnlineList() {
     currentView: e.currentView || 'list',
     currentTicketId: e.currentTicketId || null,
     currentTicketTitle: e.currentTicketTitle || null,
+    active: !!activeByUser.get(e.user.id),
     lastSeen: e.lastSeen,
     // Privacy fields for filtering
     privacy_hidden: !!e.user.privacy_hidden,
@@ -693,6 +699,7 @@ function maskOnlineListForPublic(raw) {
       currentView: u.privacy_hide_activity ? null : u.currentView,
       currentTicketId: u.privacy_hide_activity ? null : u.currentTicketId,
       currentTicketTitle: u.privacy_hide_activity ? null : u.currentTicketTitle,
+      active: u.active,
       lastSeen: u.lastSeen,
     }));
 }
@@ -1834,7 +1841,7 @@ app.get('/api/presence/stream', authMiddleware, (req, res) => {
 
 // Heartbeat: frontend sends current view every 15s
 app.post('/api/presence/heartbeat', authMiddleware, async (req, res) => {
-  const { view, ticketId, ticketTitle } = req.body;
+  const { view, ticketId, ticketTitle, active } = req.body;
   const token = req.headers.authorization?.replace('Bearer ', '');
 
   // Try to refresh user profile from Telegram (with cooldown)
@@ -1845,6 +1852,7 @@ app.post('/api/presence/heartbeat', authMiddleware, async (req, res) => {
     currentView: view || 'list',
     currentTicketId: ticketId || null,
     currentTicketTitle: ticketTitle || null,
+    active: active !== false, // default true for backward compat
     lastSeen: Date.now(),
   });
 
@@ -1921,6 +1929,7 @@ app.get('/api/presence/online', authMiddleware, (req, res) => {
         currentView: u.privacy_hide_activity && !isAdmin ? null : u.currentView,
         currentTicketId: u.privacy_hide_activity && !isAdmin ? null : u.currentTicketId,
         currentTicketTitle: u.privacy_hide_activity && !isAdmin ? null : u.currentTicketTitle,
+        active: u.active,
         lastSeen: u.lastSeen,
       };
       // Admin extras
@@ -1952,6 +1961,11 @@ app.get('/api/users', authMiddleware, (req, res) => {
     if (isAdmin) return true;
     return !u.privacy_hidden && !u.privacy_hide_online;
   }).map(u => u.id));
+  const activeIds = new Set(onlineRaw.filter(u => {
+    if (!u.active) return false;
+    if (isAdmin) return true;
+    return !u.privacy_hidden && !u.privacy_hide_online;
+  }).map(u => u.id));
 
   const result = users
     .filter(u => {
@@ -1967,6 +1981,7 @@ app.get('/api/users', authMiddleware, (req, res) => {
         photo_url: u.display_avatar === 'hidden' ? null : (u.display_avatar || u.photo_url),
         is_admin: !!u.is_admin,
         is_online: onlineIds.has(u.id),
+        is_active: activeIds.has(u.id),
         created_at: u.created_at,
         last_login: u.last_login,
       };

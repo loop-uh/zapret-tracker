@@ -87,6 +87,7 @@ const App = {
   _presencePollInterval: null,
   _onlineUsers: [],
   _onlineCount: 0,
+  _tabActive: !document.hidden,
 
   async init() {
     // Telegram WebApp setup
@@ -395,6 +396,13 @@ const App = {
     this.stopPresence();
     if (!this.token) return;
 
+    // Track tab visibility
+    this._visibilityHandler = () => {
+      this._tabActive = !document.hidden;
+      this.sendHeartbeat(); // immediately notify server on tab switch
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+
     // Poll presence every 10s
     this._presencePollInterval = setInterval(() => this.pollPresence(), 10000);
     this.pollPresence();
@@ -407,6 +415,10 @@ const App = {
   stopPresence() {
     if (this._heartbeatInterval) { clearInterval(this._heartbeatInterval); this._heartbeatInterval = null; }
     if (this._presencePollInterval) { clearInterval(this._presencePollInterval); this._presencePollInterval = null; }
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+      this._visibilityHandler = null;
+    }
   },
 
   async sendHeartbeat() {
@@ -414,8 +426,9 @@ const App = {
     const view = this.currentView;
     const ticketId = this._currentTicketId || null;
     const ticketTitle = this._currentTicketTitle || null;
+    const active = this._tabActive;
     try {
-      await this.api('POST', '/api/presence/heartbeat', { view, ticketId, ticketTitle });
+      await this.api('POST', '/api/presence/heartbeat', { view, ticketId, ticketTitle, active });
     } catch {}
   },
 
@@ -2758,12 +2771,15 @@ const App = {
                   ? `${viewLabels.ticket}: <span class="online-ticket-link" data-ticket-id="${u.currentTicketId}">#${u.currentTicketId} ${esc(u.currentTicketTitle)}</span>`
                   : esc(viewLabels[u.currentView] || u.currentView));
 
+              const isUserIdle = u.active === false;
+              const dotClass = isUserIdle ? 'online-dot online-dot-idle' : 'online-dot';
+
               return `
-                <div class="online-user-card">
+                <div class="online-user-card${isUserIdle ? ' is-idle' : ''}">
                   <div class="online-user-info">
                     <div class="online-avatar-wrap">
                       ${avatarHtml}
-                      <span class="online-dot"></span>
+                      <span class="${dotClass}"></span>
                     </div>
                     <div class="online-user-details">
                       <div class="online-user-name">
@@ -2871,8 +2887,11 @@ const App = {
         : `<div class="online-user-avatar-placeholder">${(u.first_name || '?')[0].toUpperCase()}</div>`;
 
       const onlineInfo = onlineMap.get(u.id);
+      const isIdle = u.is_online && !u.is_active;
       const statusHtml = u.is_online
-        ? `<span class="user-status-online">онлайн</span>`
+        ? (isIdle
+          ? `<span class="user-status-idle">неактивен</span>`
+          : `<span class="user-status-online">онлайн</span>`)
         : `<span class="user-status-offline">оффлайн</span>`;
 
       let locationHtml = '';
@@ -2886,11 +2905,13 @@ const App = {
         }
       }
 
+      const rowClass = u.is_online ? (isIdle ? 'is-online is-idle' : 'is-online') : '';
+
       return `
-        <div class="user-list-row ${u.is_online ? 'is-online' : ''}">
+        <div class="user-list-row ${rowClass}">
           <div class="online-avatar-wrap">
             ${avatarHtml}
-            ${u.is_online ? '<span class="online-dot"></span>' : ''}
+            ${u.is_online ? `<span class="online-dot${isIdle ? ' online-dot-idle' : ''}"></span>` : ''}
           </div>
           <div class="user-list-info">
             <div class="user-list-name">

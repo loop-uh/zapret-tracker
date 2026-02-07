@@ -1708,6 +1708,19 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   50% { box-shadow: 0 0 10px rgba(34, 197, 94, .5); }
 }
 
+.online-dot-idle {
+  background: #6b7280;
+  box-shadow: none;
+  animation: none;
+}
+
+.online-user-card.is-idle .online-user-avatar,
+.online-user-card.is-idle .online-user-avatar-placeholder,
+.user-list-row.is-idle .online-user-avatar,
+.user-list-row.is-idle .online-user-avatar-placeholder {
+  border-color: #6b7280;
+}
+
 .online-user-details {
   flex: 1;
   min-width: 0;
@@ -1776,6 +1789,10 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
   border-left: 3px solid var(--green);
 }
 
+.user-list-row.is-idle {
+  border-left: 3px solid #6b7280;
+}
+
 .user-list-info {
   flex: 1;
   min-width: 0;
@@ -1802,6 +1819,11 @@ body.tg-webapp #logout-btn { display: none; } /* can't logout inside webapp */
 
 .user-status-online {
   color: var(--green);
+  font-weight: 600;
+}
+
+.user-status-idle {
+  color: #6b7280;
   font-weight: 600;
 }
 
